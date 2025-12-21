@@ -1,8 +1,6 @@
 name: Merge index codes (KR_Stocks_Individual)
 
 on:
-  schedule:
-    - cron: "10 7 * * *"   # 매일 KST 16:10
   workflow_dispatch:
 
 permissions:
