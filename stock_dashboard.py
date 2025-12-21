@@ -17,7 +17,7 @@ import json  # 🔥 4개 엑셀 매핑용
 # ======================================
 # 페이지 설정 (최초 UI 출력 전에 호출)
 # ======================================
-st.set_page_config(page_title="올인원 주식 대시보드", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 데이터 대시보드", page_icon="🚀", layout="wide")
 
 # ======================================
 # 0. 인증 (간단 비밀번호)
@@ -63,6 +63,7 @@ if "show_days_raw" not in st.session_state:
 
 # 🔥 파일 선택 상태
 JSON_PATH = "stock_file_map.json"
+EXCEL_MAP = {}
 if "selected_category" not in st.session_state:
     # JSON 로드해서 첫 번째 항목을 기본 선택값으로
     try:
@@ -499,6 +500,10 @@ except Exception as e:
     st.stop()
 
 categories = list(EXCEL_MAP.keys())
+if not categories:
+    st.error("stock_file_map.json 에 항목이 없습니다.")
+    st.stop()
+
 if st.session_state.selected_category not in categories:
     st.session_state.selected_category = categories[0]
 
@@ -793,15 +798,23 @@ if "지수" in wb.sheetnames and indicator_df is not None and selected_labels:
     index_rows = []
     max_row_i = ws_idx.max_row
 
+    seen_codes = set()
     for r in range(2, max_row_i + 1):
         name = ws_idx.cell(row=r, column=1).value
         code = ws_idx.cell(row=r, column=2).value
         if not name or not code:
             continue
 
+        code_str = str(code).strip()
+        if code_str.isdigit():
+            code_str = code_str.zfill(6)
+        if code_str in seen_codes:
+            continue
+        seen_codes.add(code_str)
+
         row_dict = {
             "업종명": str(name),
-            "업종코드": str(code),
+            "업종코드": code_str,
         }
 
         for lbl in selected_labels:
