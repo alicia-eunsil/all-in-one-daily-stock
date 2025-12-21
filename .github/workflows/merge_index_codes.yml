@@ -2,7 +2,7 @@ name: Merge index codes (KR_Stocks_Individual)
 
 on:
   schedule:
-    - cron: "10 7 * * *"   # 매일 KST 16:10 (UTC 07:10) 예시
+    - cron: "10 7 * * *"   # 매일 KST 16:10
   workflow_dispatch:
 
 permissions:
@@ -11,6 +11,7 @@ permissions:
 jobs:
   run-merge:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,15 +30,14 @@ jobs:
         run: |
           python merge_index_codes.py
 
-      - name: Commit and push result (if changed)
+      - name: Commit and push (if changed)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 결과 파일이 생성/변경되었을 때만 커밋
-          if git status --porcelain | grep -q "KR_Stocks_Individual_merged.xlsx"; then
-            git add KR_Stocks_Individual_merged.xlsx
-            git commit -m "Update merged index sheet"
+          if git status --porcelain | grep -q "KR_Stocks_Individual.xlsx"; then
+            git add KR_Stocks_Individual.xlsx
+            git commit -m "Update index sheet (merge duplicate codes)"
             git push
           else
             echo "No changes to commit."
