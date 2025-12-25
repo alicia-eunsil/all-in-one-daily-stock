@@ -489,9 +489,9 @@ def update_index_sheet(access_token, domain, app_key, app_secret,
             wb.remove(wb['Sheet'])
 
     indices = [
-        ("KOSPI", "0001"),
-        ("KOSDAQ", "1001"),
-        ("KOSPI200", "2001"),
+        ("KOSPI", "000001"),
+        ("KOSDAQ", "001001"),
+        ("KOSPI200", "002001"),
     ]
 
     today = datetime.now()
