@@ -1,3 +1,9 @@
+"""
+File: stock_history.py
+Version: v2.0.0
+Role: 한국투자증권 API를 호출해 주식·ETF 히스토리를 가져오고 엑셀의 시세/지수 시트를 갱신한다.
+"""
+
 import json
 import requests
 from datetime import datetime, timedelta
@@ -489,10 +495,14 @@ def update_index_sheet(access_token, domain, app_key, app_secret,
             wb.remove(wb['Sheet'])
 
     indices = [
-        ("KOSPI", "000001"),
-        ("KOSDAQ", "001001"),
-        ("KOSPI200", "002001"),
+        ("KOSPI", "0001"),
+        ("KOSDAQ", "1001"),
+        ("KOSPI200", "2001"),
     ]
+
+    def normalize_index_code(code):
+        code_str = str(code).strip()
+        return code_str.zfill(6) if code_str.isdigit() else code_str
 
     today = datetime.now()
     today_str = today.strftime('%Y%m%d')
@@ -527,9 +537,10 @@ def update_index_sheet(access_token, domain, app_key, app_secret,
                 values[d] = float(v)
                 all_dates.add(d)
 
-            index_data[code] = {
+            norm_code = normalize_index_code(code)
+            index_data[norm_code] = {
                 "name": name,
-                "code": code,
+                "code": norm_code,
                 "values": values
             }
             print(f"    • {len(values)}일치 데이터 확보")
@@ -594,7 +605,7 @@ def update_index_sheet(access_token, domain, app_key, app_secret,
         code = sheet.cell(row=row, column=2).value
         if not code:
             continue
-        code_str = str(code).strip()
+        code_str = normalize_index_code(code)
         values = {}
         for idx, date_str in enumerate(existing_dates, 3):
             values[date_str] = sheet.cell(row=row, column=idx).value
@@ -636,9 +647,10 @@ def update_index_sheet(access_token, domain, app_key, app_secret,
             values[d] = float(v)
             all_dates.add(d)
 
-        new_index_data[code] = {
+        norm_code = normalize_index_code(code)
+        new_index_data[norm_code] = {
             "name": name,
-            "code": code,
+            "code": norm_code,
             "values": values
         }
         print(f"    • {len(values)}일치 신규 데이터 확보")
@@ -665,13 +677,13 @@ def update_index_sheet(access_token, domain, app_key, app_secret,
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color='CCCCCC', end_color='CCCCCC', fill_type='solid')
 
-    all_codes = set(existing_data.keys()) | set([code for _, code in indices])
+    all_codes = set(existing_data.keys()) | set(normalize_index_code(code) for _, code in indices)
 
     for row_idx, code in enumerate(sorted(all_codes), start=2):
         if code in existing_data:
             name = existing_data[code]["name"]
         else:
-            name = next((n for (n, c) in indices if c == code), code)
+            name = next((n for (n, c) in indices if normalize_index_code(c) == code), code)
 
         sheet.cell(row=row_idx, column=1, value=name)
         sheet.cell(row=row_idx, column=2, value=code)
