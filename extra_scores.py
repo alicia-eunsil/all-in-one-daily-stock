@@ -1,3 +1,10 @@
+"""
+File: extra_scores.py
+Version: v2.0.0
+Role: 가격·거래량 히스토리로 GAP/QUANT/STD 시트를 증분 계산한다.
+STD 계산 변경(1228)
+"""
+
 # gap, quant, std 전체 계산 모듈
 import openpyxl
 from openpyxl.styles import Font, PatternFill
@@ -135,46 +142,27 @@ def calc_quant(volumes_window60):
     return score
 
 
-def calc_std_value(prices, idx, window_std=20, window_mean=20):
+def calc_std_value(prices, idx, window_std=20, **kwargs):
     """
-    STD 값 계산 (_std.py의 calc_std_value 그대로):
-
-    - idx 시점에서 20일 롤링 표준편차 σ_t 계산
-    - 과거 window_mean(20)일 동안 각 시점의 20일 롤링 σ의 평균(avg_std) 계산
-    - STD = (σ_t / avg_std - 1) * 100
-    - 소수 둘째 자리까지 반올림
+    STD 값 계산:
+    - idx 시점의 최근 window_std(20)개 종가에 대해 표준편차를 계산한다.
+    - 공식은 float(np.sqrt(np.nansum(diffs ** 2)))
     """
-    min_idx = window_std + window_mean - 2  # 예: 20 + 20 - 2 = 38
-    if idx < min_idx:
+    if idx < window_std - 1:
         return None
 
-    std_list = []
-    for j in range(idx - window_mean + 1, idx + 1):  # j: idx-19 ~ idx
-        start = j - window_std + 1
-        end = j + 1
-        if start < 0:
-            return None
+    start = idx - window_std + 1
+    end = idx + 1
+    window_prices = prices[start:end]
 
-        window_prices = prices[start:end]
-
-        if any(p is None for p in window_prices):
-            return None
-
-        arr = np.array(window_prices, dtype=float)
-        sigma = float(np.std(arr, ddof=0))  # 모표준편차
-        std_list.append(sigma)
-
-    if not std_list:
+    if len(window_prices) < window_std or any(p is None for p in window_prices):
         return None
 
-    std_today = std_list[-1]
-    avg_std = sum(std_list) / len(std_list)
-    if avg_std == 0:
-        return 0
-
-    raw_val = (std_today / avg_std - 1) * 100
-    val = float(Decimal(str(raw_val)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
-    return val
+    arr = np.array(window_prices, dtype=float)
+    mean = np.nanmean(arr)
+    diffs = arr - mean
+    std_val = float(np.sqrt(np.nanmean(diffs ** 2)))
+    return float(Decimal(str(std_val)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
 # =========================
@@ -377,7 +365,7 @@ def save_quant_sheet(filename, dates, stocks, window=60, sheet_name='quant'):
 # =========================
 
 def save_std_sheet(filename, dates, stocks, sheet_name='std', window_std=20, window_mean=20):
-    min_idx = window_std + window_mean - 2
+    min_idx = window_std - 1
     if len(dates) <= min_idx:
         print(f"⚠ STD: 데이터가 부족합니다. ({filename})")
         return
@@ -397,7 +385,7 @@ def save_std_sheet(filename, dates, stocks, sheet_name='std', window_std=20, win
         i = min_idx + idx_global
         if i >= len(series):
             return None
-        return calc_std_value(series, i, window_std=window_std, window_mean=window_mean)
+        return calc_std_value(series, i, window_std=window_std)
 
     existing_count = len(existing_dates)
     fill_existing_for_new_codes(sheet, code_to_row, stock_map, existing_count, calc_func)
