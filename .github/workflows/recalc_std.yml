@@ -1,0 +1,42 @@
+name: Recompute STD last10 (KR_Stocks_Individual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-recompute-std:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run STD recompute script
+        run: |
+          python recompute_std_last10.py
+
+      - name: Commit and push (if changed)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git status --porcelain | grep -q "KR_Stocks_Individual.xlsx"; then
+            git add KR_Stocks_Individual.xlsx
+            git commit -m "Recompute STD sheet (last 10 days)"
+            git push
+          else
+            echo "No changes to commit."
+          fi
