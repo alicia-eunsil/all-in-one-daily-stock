@@ -32,6 +32,7 @@ STD_SHEET = "std"
 PRICE_SHEET = "종가"
 WINDOW = 20
 RECENT_DAYS = 20
+START_DATE_LABEL = 20251212  # YYYYMMDD 기준 재계산 시작 지점
 
 
 def load_std_sheet(path: Path):
@@ -110,15 +111,31 @@ def recompute_std(values: np.ndarray) -> float:
     return float(val)
 
 
-def update_recent_std(df: pd.DataFrame, date_columns, price_matrix, label_positions):
+def update_recent_std(df: pd.DataFrame, date_columns, price_matrix, label_positions, start_label=None):
+    normalized_labels = [format_date_label(col) for col in date_columns]
+
     start_index = max(0, len(date_columns) - RECENT_DAYS)
+    if start_label:
+        for idx, lbl in enumerate(normalized_labels):
+            try:
+                lbl_int = int(lbl)
+            except (TypeError, ValueError):
+                continue
+            if lbl_int >= start_label:
+                start_index = idx
+                break
+
     codes = df["종목코드"].tolist()
 
     for idx_col in range(start_index, len(date_columns)):
-        label = date_columns[idx_col]
-        pos = label_positions.get(label)
+        raw_label = date_columns[idx_col]
+        norm_label = normalized_labels[idx_col]
+        pos = label_positions.get(norm_label)
         if pos is None:
             continue
+
+        # 기존 데이터를 비운 후 새 값으로 채움
+        df[raw_label] = np.nan
 
         new_values = []
         for code in codes:
@@ -132,7 +149,7 @@ def update_recent_std(df: pd.DataFrame, date_columns, price_matrix, label_positi
         new_values = np.array(new_values, dtype=float)
         mask = ~np.isnan(new_values)
         new_values[mask] = np.round(new_values[mask], 2)
-        df[label] = new_values
+        df[raw_label] = new_values
 
     return df
 
@@ -202,7 +219,13 @@ def main():
     if len(date_cols) < WINDOW:
         raise ValueError(f"날짜 열이 {WINDOW}개 이상 필요합니다.")
 
-    updated = update_recent_std(df.copy(), date_cols, price_matrix, label_positions)
+    updated = update_recent_std(
+        df.copy(),
+        date_cols,
+        price_matrix,
+        label_positions,
+        start_label=START_DATE_LABEL,
+    )
     updated = normalize_date_columns(updated)
     if "종목코드" in updated.columns:
         updated["종목코드"] = updated["종목코드"].apply(normalize_code)
@@ -223,3 +246,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
