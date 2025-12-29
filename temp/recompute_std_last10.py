@@ -26,7 +26,7 @@ def normalize_code(value):
         return s
     return digits.zfill(6)
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]  # repo root
 EXCEL_PATH = BASE_DIR / "KR_Stocks_Individual.xlsx"
 STD_SHEET = "std"
 PRICE_SHEET = "종가"
