@@ -10,11 +10,11 @@ import openpyxl
 from openpyxl.utils import column_index_from_string
 
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_FILE = BASE_DIR / "KR_Stocks_Individual.xlsx"
+BASE_DIR = Path(__file__).resolve().parents[1]  # repo root
+EXCEL_PATH = BASE_DIR / "KR_Stocks_Individual.xlsx"
 DEFAULT_SHEET = "std"
-DEFAULT_START_COL = "C"  # 필요에 맞게 수정
-DEFAULT_END_COL = "D"    # 필요에 맞게 수정
+DEFAULT_START_COL = "BZ"  # 필요에 맞게 수정
+DEFAULT_END_COL = "CR"    # 필요에 맞게 수정
 
 
 def parse_col(value: str) -> int:
