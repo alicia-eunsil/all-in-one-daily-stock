@@ -166,6 +166,29 @@ def _format_q_cell(v):
         out += " 🔵"
     return out
 
+
+GAP_EMOJI_WINDOW = 20
+def _apply_gap_emojis(df, columns, window=GAP_EMOJI_WINDOW):
+    if not columns:
+        return
+    consider_cols = columns[-window:]
+    for idx in df.index:
+        numeric_vals = pd.to_numeric(df.loc[idx, consider_cols], errors="coerce").dropna()
+        if numeric_vals.empty:
+            continue
+        max_val = numeric_vals.max()
+        min_val = numeric_vals.min()
+        for col in consider_cols:
+            val = pd.to_numeric(df.at[idx, col], errors="coerce")
+            if pd.isna(val):
+                continue
+            suffix = ""
+            if val == max_val:
+                suffix = " 🔴"
+            elif val == min_val:
+                suffix = " 🔵"
+            df.at[idx, col] = f"{val:.0f}{suffix}"
+
 # ======================================
 # 3. 뷰 렌더링 함수들
 # ======================================
@@ -265,6 +288,9 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
             if col in df_show.columns:
                 df_show[col] = df_show[col].apply(_format_q_cell)
 
+    gap_columns_total = [(lbl, "GAP") for lbl in selected_labels if (lbl, "GAP") in df_show.columns]
+    _apply_gap_emojis(df_show, gap_columns_total)
+
     # --------------------------------------
     # 🔽 지수(KOSPI/KOSDAQ/KOSPI200) 행 추가
     # --------------------------------------
@@ -337,14 +363,14 @@ def render_metric_view(indicator_df, selected_labels):
     # -------------------------
     # DF 구성 (종목코드, 종목명 + 날짜별 값)
     # -------------------------
-    df_metric = indicator_df[["종목코드", "종목명"]].copy()
+    df_metric_numeric = indicator_df[["종목코드", "종목명"]].copy()
 
     for lbl in selected_labels:
         col_key = (lbl, metric)
         if col_key in indicator_df.columns:
-            df_metric[lbl] = indicator_df[col_key]
+            df_metric_numeric[lbl] = indicator_df[col_key]
         else:
-            df_metric[lbl] = None
+            df_metric_numeric[lbl] = None
 
     # 값 포맷팅
     def _format_plain(v):
@@ -365,12 +391,15 @@ def render_metric_view(indicator_df, selected_labels):
         formatter = _format_s_cell
     elif metric.startswith("Z"):
         formatter = _format_z_cell
+    elif metric == "QUANT":
+        formatter = _format_q_cell
     else:
         formatter = _format_plain
 
+    df_metric_display = df_metric_numeric.copy()
     for lbl in selected_labels:
-        if lbl in df_metric.columns:
-            df_metric[lbl] = df_metric[lbl].apply(formatter)
+        if lbl in df_metric_display.columns:
+            df_metric_display[lbl] = df_metric_display[lbl].apply(formatter)
 
     # 🔍 필터 + 정렬
     st.markdown("### 🔍 필터 옵션 (지표별)")
@@ -380,14 +409,38 @@ def render_metric_view(indicator_df, selected_labels):
     with c2:
         sort_metric = st.selectbox("정렬 기준", ["종목코드", "종목명"], key="sort_metric")
 
-    df_filtered = df_metric.copy()
+    df_filtered_display = df_metric_display.copy()
+    df_filtered_numeric = df_metric_numeric.copy()
     if search_metric:
-        df_filtered = df_filtered[
-            df_filtered["종목명"].astype(str).str.contains(search_metric, case=False)
-            | df_filtered["종목코드"].astype(str).str.contains(search_metric, case=False)
-        ]
+        mask = (
+            df_filtered_display["종목명"].astype(str).str.contains(search_metric, case=False)
+            | df_filtered_display["종목코드"].astype(str).str.contains(search_metric, case=False)
+        )
+        df_filtered_display = df_filtered_display[mask]
+        df_filtered_numeric = df_filtered_numeric[mask]
 
-    df_filtered = df_filtered.sort_values(by=sort_metric).reset_index(drop=True)
+    sort_order = df_filtered_display.sort_values(by=sort_metric).index
+    df_filtered_display = df_filtered_display.loc[sort_order].reset_index(drop=True)
+    df_filtered_numeric = df_filtered_numeric.loc[sort_order].reset_index(drop=True)
+
+    if metric == "GAP":
+        gap_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
+        _apply_gap_emojis(df_filtered_display, gap_columns_metric)
+
+    # 평균 행 추가
+    avg_row = {"종목코드": "AVG", "종목명": "평균"}
+    for lbl in selected_labels:
+        if lbl not in df_filtered_numeric.columns:
+            continue
+        col_numeric = pd.to_numeric(df_filtered_numeric[lbl], errors="coerce")
+        mean_val = col_numeric.mean(skipna=True)
+        if pd.isna(mean_val):
+            avg_row[lbl] = "-"
+        else:
+            avg_row[lbl] = formatter(mean_val)
+
+    df_filtered = df_filtered_display.copy()
+    df_filtered.loc[len(df_filtered)] = avg_row
 
     # 날짜 범위 안내
     if selected_labels:
