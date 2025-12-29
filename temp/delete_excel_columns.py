@@ -11,7 +11,7 @@ from openpyxl.utils import column_index_from_string
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]  # repo root
-EXCEL_PATH = BASE_DIR / "KR_Stocks_Individual.xlsx"
+DEFAULT_FILE = BASE_DIR / "KR_Stocks_Individual.xlsx"
 DEFAULT_SHEET = "std"
 DEFAULT_START_COL = "BZ"  # 필요에 맞게 수정
 DEFAULT_END_COL = "CR"    # 필요에 맞게 수정
@@ -48,7 +48,7 @@ def delete_columns(file_path: Path, sheet_name: str, start_col: str, end_col: st
 
 def main():
     parser = argparse.ArgumentParser(description="엑셀 시트에서 특정 열 범위를 삭제합니다.")
-    parser.add_argument("--file", default=str(EXCEL_PATH), help="엑셀 파일 경로")
+    parser.add_argument("--file", default=str(DEFAULT_FILE), help="엑셀 파일 경로")
     parser.add_argument("--sheet", default=DEFAULT_SHEET, help="시트 이름")
     parser.add_argument("--start_col", default=str(DEFAULT_START_COL), help="삭제 시작 열 (예: 3 또는 C)")
     parser.add_argument("--end_col", default=str(DEFAULT_END_COL), help="삭제 끝 열 (예: 5 또는 E)")
