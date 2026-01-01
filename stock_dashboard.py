@@ -607,15 +607,14 @@ with st.sidebar:
 if st.session_state.run_update:
     with st.sidebar:
         st.subheader("진행 상황")
-        pb = st.progress(0)
-        msg = st.empty()
+        status_box = st.empty()
 
     scripts = [
         ("run_all_scores.py", "4개 엑셀 S/Z + GAP/QUANT/STD 계산"),
     ]
 
     for idx, (sc, desc) in enumerate(scripts):
-        msg.write(f"{desc} 실행 중...")
+        status_box.info(f"{desc} 실행 중...")
         try:
             result = subprocess.run(
                 [sys.executable, sc], capture_output=True, text=True, timeout=1800
@@ -626,9 +625,9 @@ if st.session_state.run_update:
                 st.sidebar.error(f"{desc} 실패")
                 st.sidebar.code(result.stderr[:500])
         except Exception as e:
-            st.sidebar.error(f"{desc} 오류 발생: {e}")
+                st.sidebar.error(f"{desc} 오류 발생: {e}")
 
-        pb.progress((idx + 1) / len(scripts))
+        status_box.success(f"{desc} 완료")
 
     st.session_state.data_loaded = True
     st.session_state.run_update = False
