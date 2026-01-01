@@ -1,26 +1,17 @@
-name: Delete Excel Columns (KR_Stocks_Individual)
+# .github/workflows/delete-excel-columns.yml
+# 목적: GitHub Actions에서 입력 인자 없이 실행하여,
+#      파이썬 스크립트(delete_excel_columns.py)의 DEFAULT_* 값을 그대로 사용함.
+
+name: Delete Excel Columns (Defaults Only)
 
 on:
-  workflow_dispatch:
-    inputs:
-      sheet:
-        description: "Sheet name"
-        required: true
-        default: "std"
-      start_col:
-        description: "Start column (e.g., BZ or 78)"
-        required: true
-        default: "BZ"
-      end_col:
-        description: "End column (e.g., CR or 96)"
-        required: true
-        default: "CR"
+  workflow_dispatch: {}  # 입력창 없이 "Run workflow" 버튼만 표시
 
 permissions:
   contents: write
 
 jobs:
-  delete-cols:
+  run-delete:
     runs-on: ubuntu-latest
 
     steps:
@@ -37,19 +28,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install openpyxl
 
-      - name: Run delete script
+      # 중요: 여기서 --file / --sheet / --start_col / --end_col 을 절대 넘기지 않습니다.
+      # 따라서 스크립트의 DEFAULT_FILE/DEFAULT_SHEET/DEFAULT_START_COL/DEFAULT_END_COL 이 적용됩니다.
+      - name: Run delete script (use script defaults)
         run: |
-          python temp/delete_excel_columns.py --file KR_Stocks_Individual.xlsx
+          python scripts/delete_excel_columns.py
 
-      - name: Commit and push (if changed)
+      # 변경된 엑셀 파일을 레포에 반영하려면 커밋/푸시가 필요합니다.
+      # (삭제 작업은 워크스페이스 파일을 바꾸는 것이라, 푸시하지 않으면 레포에 남지 않습니다.)
+      - name: Commit and push changes (if any)
         run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git status --porcelain | grep -q "KR_Stocks_Individual.xlsx"; then
-            git add KR_Stocks_Individual.xlsx
-            git commit -m "Delete columns ${{ inputs.start_col }}-${{ inputs.end_col }} in ${{ inputs.sheet }}"
-            git push
-          else
-            echo "No changes to commit."
-          fi
+          git add -A
+          git commit -m "chore: delete excel columns (defaults only)"
+          git push
