@@ -168,7 +168,10 @@ def _format_q_cell(v):
 
 
 GAP_EMOJI_WINDOW = 20
-def _apply_gap_emojis(df, columns, window=GAP_EMOJI_WINDOW):
+STD_EMOJI_WINDOW = 20
+
+
+def _apply_extrema_emojis(df, columns, window, fmt):
     if not columns:
         return
     consider_cols = columns[-window:]
@@ -187,7 +190,15 @@ def _apply_gap_emojis(df, columns, window=GAP_EMOJI_WINDOW):
                 suffix = " 🔴"
             elif val == min_val:
                 suffix = " 🔵"
-            df.at[idx, col] = f"{val:.0f}{suffix}"
+            df.at[idx, col] = f"{val:{fmt}}{suffix}"
+
+
+def _apply_gap_emojis(df, columns, window=GAP_EMOJI_WINDOW):
+    _apply_extrema_emojis(df, columns, window, ".0f")
+
+
+def _apply_std_emojis(df, columns, window=STD_EMOJI_WINDOW):
+    _apply_extrema_emojis(df, columns, window, ".2f")
 
 # ======================================
 # 3. 뷰 렌더링 함수들
@@ -290,6 +301,8 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
 
     gap_columns_total = [(lbl, "GAP") for lbl in selected_labels if (lbl, "GAP") in df_show.columns]
     _apply_gap_emojis(df_show, gap_columns_total)
+    std_columns_total = [(lbl, "STD") for lbl in selected_labels if (lbl, "STD") in df_show.columns]
+    _apply_std_emojis(df_show, std_columns_total)
 
     # --------------------------------------
     # 🔽 지수(KOSPI/KOSDAQ/KOSPI200) 행 추가
@@ -426,6 +439,9 @@ def render_metric_view(indicator_df, selected_labels):
     if metric == "GAP":
         gap_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
         _apply_gap_emojis(df_filtered_display, gap_columns_metric)
+    elif metric == "STD":
+        std_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
+        _apply_std_emojis(df_filtered_display, std_columns_metric)
 
     # 평균 행 추가
     avg_row = {"종목코드": "AVG", "종목명": "평균"}
