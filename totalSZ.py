@@ -1,10 +1,20 @@
+"""
+File: totalSZ.py
+Version: v3.0.0
+Role: 종가/지수 히스토리를 기반으로 S/Z 및 IS/IZ 점수 시트를 증분 업데이트한다.
+# 메모: 3.0.0 - KR_Stocks_Individual 대상 지수(IS/IZ) 계산 추가
+"""
+
 # totalS, totalZ 통합모듈
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill
 from decimal import Decimal, ROUND_HALF_UP
 import numpy as np
+from pathlib import Path
 
+INDEX_SHEET_NAME = "지수"
+INDEX_TARGET_STEM = "KR_Stocks_Individual"
 
 # =========================
 # 1. S 점수 (원본 totalS.py 동일)
@@ -53,24 +63,36 @@ def calc_z(prices, window: int):
 # =========================
 # 3. 종가 시트를 읽어서 dates, stocks 반환
 # =========================
-def get_close_data(filename: str):
+def _normalize_date_value(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        iv = int(value)
+        digits = str(iv)
+        if len(digits) == 8 and digits.isdigit():
+            return int(digits)
+        return None
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if len(digits) == 8:
+        return int(digits)
+    return None
+
+
+def get_close_data(filename: str, sheet_name: str = "종가"):
     wb = openpyxl.load_workbook(filename, data_only=True)
 
-    if "종가" not in wb.sheetnames:
-        raise ValueError(f"'{filename}' 파일에 '종가' 시트가 없습니다.")
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"'{filename}' 파일에 '{sheet_name}' 시트가 없습니다.")
 
-    sheet = wb["종가"]
+    sheet = wb[sheet_name]
 
     # 날짜 가져오기
     dates = []
     for col in range(3, sheet.max_column + 1):
         v = sheet.cell(row=1, column=col).value
-        if v is None:
-            continue
-        try:
-            dates.append(int(v))
-        except:
-            continue
+        norm = _normalize_date_value(v)
+        if norm is not None:
+            dates.append(norm)
 
     # 종목 데이터
     stocks = []
@@ -116,11 +138,11 @@ def get_existing_dates(sheet):
     return dates
 
 
-def ensure_score_sheet(wb, sheet_name, stocks):
+def ensure_score_sheet(wb, sheet_name, stocks, name_header="종목명", code_header="종목코드"):
     if sheet_name not in wb.sheetnames:
         sheet = wb.create_sheet(sheet_name)
-        sheet.cell(row=1, column=1, value="종목명")
-        sheet.cell(row=1, column=2, value="종목코드")
+        sheet.cell(row=1, column=1, value=name_header)
+        sheet.cell(row=1, column=2, value=code_header)
         sheet.cell(row=1, column=1).font = Font(bold=True)
         sheet.cell(row=1, column=2).font = Font(bold=True)
         sheet.cell(row=1, column=1).fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
@@ -139,8 +161,8 @@ def ensure_score_sheet(wb, sheet_name, stocks):
     existing_dates = get_existing_dates(sheet)
 
     # 보정: 1,2열 헤더 강조
-    sheet.cell(row=1, column=1, value="종목명").font = Font(bold=True)
-    sheet.cell(row=1, column=2, value="종목코드").font = Font(bold=True)
+    sheet.cell(row=1, column=1, value=name_header).font = Font(bold=True)
+    sheet.cell(row=1, column=2, value=code_header).font = Font(bold=True)
     sheet.cell(row=1, column=1).fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
     sheet.cell(row=1, column=2).fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
 
@@ -176,7 +198,8 @@ def calc_score_for_index(prices, window, idx_in_valid, calc_func):
 # =========================
 # 5. S/Z 단일 시트 저장 엔진
 # =========================
-def save_score_sheet(filename, dates, stocks, window, sheet_name, calc_func):
+def save_score_sheet(filename, dates, stocks, window, sheet_name, calc_func,
+                     name_header="종목명", code_header="종목코드"):
     wb = openpyxl.load_workbook(filename)
 
     if len(dates) < window:
@@ -186,7 +209,8 @@ def save_score_sheet(filename, dates, stocks, window, sheet_name, calc_func):
     # window일 이후 날짜만 계산됨
     valid_dates = dates[window - 1:]
 
-    sheet, existing_dates, code_to_row, new_codes = ensure_score_sheet(wb, sheet_name, stocks)
+    sheet, existing_dates, code_to_row, new_codes = ensure_score_sheet(
+        wb, sheet_name, stocks, name_header=name_header, code_header=code_header)
     stock_map = {str(stock["code"]): stock for stock in stocks}
     existing_count = len(existing_dates)
 
@@ -250,6 +274,40 @@ def run_total_sz(filename):
     # ---- Z 점수 ----
     for window, sheet in [(20, "z20"), (60, "z60"), (120, "z120")]:
         save_score_sheet(filename, dates, stocks, window, sheet, calc_z)
+
+    # ---- 지수 기반 IS/IZ 점수 (KR_Stocks_Individual 한정) ----
+    if Path(filename).stem == INDEX_TARGET_STEM:
+        try:
+            index_dates, index_stocks = get_close_data(filename, sheet_name=INDEX_SHEET_NAME)
+        except ValueError as e:
+            print(f"⚠ 지수 시트 처리 실패: {e}")
+        else:
+            if index_dates and index_stocks:
+                print("➡ 지수(IS/IZ) 점수 계산 시작")
+                for window, sheet in [(20, "is20"), (60, "is60"), (120, "is120")]:
+                    save_score_sheet(
+                        filename,
+                        index_dates,
+                        index_stocks,
+                        window,
+                        sheet,
+                        calc_s,
+                        name_header="업종명",
+                        code_header="업종코드",
+                    )
+                for window, sheet in [(20, "iz20"), (60, "iz60"), (120, "iz120")]:
+                    save_score_sheet(
+                        filename,
+                        index_dates,
+                        index_stocks,
+                        window,
+                        sheet,
+                        calc_z,
+                        name_header="업종명",
+                        code_header="업종코드",
+                    )
+            else:
+                print("⚠ 지수 데이터가 부족해 IS/IZ 계산을 건너뜁니다.")
 
     print(f"=== S/Z 통합 점수 계산 완료 ===\n")
 
