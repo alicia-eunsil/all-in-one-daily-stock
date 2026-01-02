@@ -1,7 +1,8 @@
 """
 File: stock_dashboard.py
-Version: v2.0.0
+Version: v3.0.0
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
+# 메모: v3.0.0 - KR_Stocks_Individual 지수(is/iz/igap/istd) 데이터를 종합/지표별/원자료 뷰에 표시하도록 확장
 """
 
 import streamlit as st
@@ -64,6 +65,7 @@ if "show_days_raw" not in st.session_state:
 # 🔥 파일 선택 상태
 JSON_PATH = "stock_file_map.json"
 EXCEL_MAP = {}
+INDEX_SHEET_NAME = "지수"
 if "selected_category" not in st.session_state:
     # JSON 로드해서 첫 번째 항목을 기본 선택값으로
     try:
@@ -200,10 +202,57 @@ def _apply_gap_emojis(df, columns, window=GAP_EMOJI_WINDOW):
 def _apply_std_emojis(df, columns, window=STD_EMOJI_WINDOW):
     _apply_extrema_emojis(df, columns, window, ".2f")
 
+
+def _load_index_metric_data(wb, selected_labels):
+    sheet_map = {
+        "S20": "is20",
+        "S60": "is60",
+        "S120": "is120",
+        "Z20": "iz20",
+        "Z60": "iz60",
+        "Z120": "iz120",
+        "GAP": "igap",
+        "STD": "istd",
+    }
+    combined = {}
+    per_metric = {}
+    for metric, sheet_name in sheet_map.items():
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        label_to_col = {}
+        for col in range(3, ws.max_column + 1):
+            raw = ws.cell(row=1, column=col).value
+            if raw is None:
+                continue
+            lbl = format_excel_date(raw)
+            label_to_col[lbl] = col
+
+        for row in range(2, ws.max_row + 1):
+            name = ws.cell(row=row, column=1).value
+            code = ws.cell(row=row, column=2).value
+            if not name or not code:
+                continue
+            code_str = str(code).strip()
+            if code_str.isdigit():
+                code_str = code_str.zfill(6)
+            entry = combined.setdefault(code_str, {"code": code_str, "name": str(name), "values": {}})
+            metric_row = {"code": code_str, "name": str(name), "values": {}}
+            for lbl in selected_labels:
+                col_idx = label_to_col.get(lbl)
+                val = ws.cell(row=row, column=col_idx).value if col_idx else None
+                entry["values"][(lbl, metric)] = val
+                metric_row["values"][lbl] = val
+            per_metric.setdefault(metric, []).append(metric_row)
+
+    combined_list = list(combined.values()) if combined else []
+    return combined_list, per_metric
+
 # ======================================
 # 3. 뷰 렌더링 함수들
 # ======================================
-def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_days, index_df=None):
+def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_days,
+                     index_df=None, index_metric_rows=None):
     """
     1️⃣ 종합 탭
     - 멀티헤더(날짜×지표) 구조
@@ -275,6 +324,34 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
 
     df_show.loc[len(df_show)] = avg_row  # 평균 행 추가
 
+    index_rows_df = None
+    if index_metric_rows:
+        index_records = []
+        for row in index_metric_rows:
+            row_dict = {("", "종목코드"): row["code"], ("", "종목명"): row["name"]}
+            for (lbl, metric), val in row["values"].items():
+                col = (lbl, metric)
+                if col in df_show.columns:
+                    row_dict[col] = val
+            index_records.append(row_dict)
+
+        if index_records:
+            index_rows_df = pd.DataFrame(index_records)
+            index_rows_df = index_rows_df.reindex(columns=df_show.columns)
+            df_show = pd.concat([df_show, index_rows_df], ignore_index=True)
+
+            avg_idx_vals = []
+            for col in df_show.columns:
+                if col == ("", "종목코드"):
+                    avg_idx_vals.append("INDEX AVG")
+                elif col == ("", "종목명"):
+                    avg_idx_vals.append("지수 평균")
+                else:
+                    series = pd.to_numeric(index_rows_df[col], errors="coerce")
+                    mean_val = series.mean(skipna=True)
+                    avg_idx_vals.append(mean_val if pd.notna(mean_val) else None)
+            df_show.loc[len(df_show)] = avg_idx_vals
+
     # --------------------------------------
     # Z/S/Q/GAP 포맷 이모지 적용
     # --------------------------------------
@@ -305,12 +382,12 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     _apply_std_emojis(df_show, std_columns_total)
 
     # --------------------------------------
-    # 🔽 지수(KOSPI/KOSDAQ/KOSPI200) 행 추가
+    # 🔽 지수(KOSPI/KOSDAQ/KOSPI200) 행 추가 (레거시, 지수 지표 데이터 없을 때)
     # --------------------------------------
-    if index_df is not None and not index_df.empty:
+    if (not index_metric_rows) and index_df is not None and not index_df.empty:
         for _, idx_row in index_df.iterrows():
             new_row_vals = []
-            used_dates = set()  # 같은 날짜에 한 번만 값 넣기 위한 기록
+            used_dates = set()
 
             for col in df_show.columns:
                 if col == ("", "종목코드"):
@@ -326,7 +403,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
                     else:
                         new_row_vals.append("")
 
-            df_show.loc[len(df_show)] = new_row_vals  # 지수 행 추가
+            df_show.loc[len(df_show)] = new_row_vals
 
     # 인덱스 설정 (종목코드·종목명)
     df_show = df_show.set_index([("", "종목코드"), ("", "종목명")])
@@ -343,7 +420,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
         st.rerun()
 
 
-def render_metric_view(indicator_df, selected_labels):
+def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     """
     2️⃣ 지표별 탭:
     - 1열: 종목코드
@@ -458,6 +535,28 @@ def render_metric_view(indicator_df, selected_labels):
     df_filtered = df_filtered_display.copy()
     df_filtered.loc[len(df_filtered)] = avg_row
 
+    if index_metric_map and metric in index_metric_map:
+        idx_rows = index_metric_map[metric]
+        if idx_rows:
+            idx_display_records = []
+            for row in idx_rows:
+                rec = {"종목코드": row["code"], "종목명": row["name"]}
+                for lbl in selected_labels:
+                    rec[lbl] = formatter(row["values"].get(lbl))
+                idx_display_records.append(rec)
+
+            if idx_display_records:
+                df_idx_display = pd.DataFrame(idx_display_records)
+                df_filtered = pd.concat([df_filtered, df_idx_display], ignore_index=True)
+
+                avg_idx_row = {"종목코드": "INDEX AVG", "종목명": "지수 평균"}
+                for lbl in selected_labels:
+                    vals = [row["values"].get(lbl) for row in idx_rows]
+                    series = pd.to_numeric(vals, errors="coerce")
+                    mean_val = series.mean(skipna=True)
+                    avg_idx_row[lbl] = formatter(mean_val)
+                df_filtered.loc[len(df_filtered)] = avg_idx_row
+
     # 날짜 범위 안내
     if selected_labels:
         oldest_label = selected_labels[0]
@@ -493,7 +592,7 @@ def render_metric_view(indicator_df, selected_labels):
         st.rerun()
 
 
-def render_raw_view(close_df, close_range_msg, total_close_days):
+def render_raw_view(close_df, close_range_msg, total_close_days, index_close_rows=None):
     """
     3️⃣ 원자료(종가) 탭
     - 종목코드/종목명 + 날짜별 종가
@@ -537,6 +636,13 @@ def render_raw_view(close_df, close_range_msg, total_close_days):
         has_decimal = df_raw[c].dropna().apply(lambda v: not float(v).is_integer()).any()
         number_format = "%.2f" if has_decimal else "%.0f"
         column_config[c] = st.column_config.NumberColumn(c, format=number_format)
+
+    if index_close_rows:
+        for row in index_close_rows:
+            new_row = {"종목코드": row.get("업종코드", ""), "종목명": row.get("업종명", "")}
+            for c in date_cols:
+                new_row[c] = row.get(c, None)
+            df_raw.loc[len(df_raw)] = new_row
 
     st.dataframe(
         df_raw,
@@ -591,6 +697,7 @@ selected_category = st.radio(
 st.session_state.selected_category = selected_category
 selected_filename = EXCEL_MAP[selected_category]
 excel_path = Path(selected_filename)
+is_index_target = excel_path.stem == "KR_Stocks_Individual"
 
 #st.markdown(f"#### 현재: `{selected_category}`")
 
@@ -688,6 +795,8 @@ indicator_date_infos = []
 total_days = 0
 selected_labels = []
 indicator_range_msg = ""
+index_metric_rows = []
+index_metric_map = {}
 
 if base_ws:
     max_col = base_ws.max_column
@@ -760,6 +869,9 @@ if base_ws:
 else:
     indicator_df = None
 
+if indicator_df is not None and is_index_target and selected_labels:
+    index_metric_rows, index_metric_map = _load_index_metric_data(wb, selected_labels)
+
 # ======================================
 # 11. 원자료(종가) 데이터 로딩
 # ======================================
@@ -767,6 +879,7 @@ close_df = None
 close_date_infos = []
 total_close_days = 0
 close_range_msg = ""
+index_close_rows = []
 
 if "종가" in wb.sheetnames:
     ws = wb["종가"]
@@ -835,10 +948,35 @@ if "종가" in wb.sheetnames:
 
     close_df = close_df.rename(columns=rename_map)
 
+    if is_index_target and INDEX_SHEET_NAME in wb.sheetnames:
+        ws_idx_raw = wb[INDEX_SHEET_NAME]
+        label_to_col_close = {label: col_idx for col_idx, raw, dt, label in selected_close_infos}
+        rows_raw = []
+        for r in range(2, ws_idx_raw.max_row + 1):
+            name = ws_idx_raw.cell(row=r, column=1).value
+            code = ws_idx_raw.cell(row=r, column=2).value
+            if not name or not code:
+                continue
+            code_str = str(code).strip()
+            if code_str.isdigit():
+                code_str = code_str.zfill(6)
+            row_dict = {"업종명": str(name), "업종코드": code_str}
+            for lbl in close_df.columns:
+                if lbl in ("종목코드", "종목명"):
+                    continue
+                col_idx = label_to_col_close.get(lbl)
+                if col_idx is None:
+                    row_dict[lbl] = None
+                else:
+                    row_dict[lbl] = ws_idx_raw.cell(row=r, column=col_idx).value
+            rows_raw.append(row_dict)
+        index_close_rows = rows_raw
+
 # ======================================
 # 12. 지수(KOSPI/KOSDAQ/KOSPI200) 데이터 로딩
 # ======================================
 index_df = None
+index_close_rows = []
 
 if "지수" in wb.sheetnames and indicator_df is not None and selected_labels:
     ws_idx = wb["지수"]
@@ -918,19 +1056,20 @@ with tab_total:
             indicator_range_msg,
             total_days,
             index_df=index_df,
+            index_metric_rows=index_metric_rows,
         )
 
 with tab_metric:
     if indicator_df is None:
         st.warning("⚠️ 지표별 데이터를 불러올 수 없습니다.")
     else:
-        render_metric_view(indicator_df, selected_labels)
+        render_metric_view(indicator_df, selected_labels, index_metric_map=index_metric_map)
 
 with tab_raw:
     if close_df is None:
         st.warning("⚠️ 원자료(종가) 데이터를 불러올 수 없습니다.")
     else:
-        render_raw_view(close_df, close_range_msg, total_close_days)
+        render_raw_view(close_df, close_range_msg, total_close_days, index_close_rows=index_close_rows if is_index_target else None)
 
 st.markdown("---")
 st.caption("Created by Alicia")
