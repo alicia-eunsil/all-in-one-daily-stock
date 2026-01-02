@@ -1,7 +1,8 @@
 """
 File: extra_scores.py
-Version: v2.0.0
+Version: v3.0.0
 Role: 가격·거래량 히스토리로 GAP/QUANT/STD 시트를 증분 계산한다.
+# 메모: v3.0.0 - KR_Stocks_Individual 대상 지수(igap/istd) 계산 지원
 """
 
 # gap, quant, std 전체 계산 모듈
@@ -10,9 +11,13 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 import numpy as np
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 
 HEADER_FILL = PatternFill(start_color='CCCCCC', end_color='CCCCCC', fill_type='solid')
 HEADER_FONT = Font(bold=True)
+
+INDEX_SHEET_NAME = "지수"
+INDEX_TARGET_STEM = "KR_Stocks_Individual"
 
 
 # =========================
@@ -92,6 +97,50 @@ def get_volume_data(filename):
             stocks.append({'name': name, 'code': code, 'volumes': volumes_numeric})
     except Exception as e:
         print(f"⚠ 거래량 시트 로딩 중 오류: {e}")
+    return dates, stocks
+
+
+def get_index_data(filename):
+    """
+    '지수' 시트에서 날짜와 지수 시계열을 읽어온다.
+    - dates: ['YYYYMMDD', ...]
+    - stocks: [{'name': 업종명, 'code': 업종코드, 'prices': [...]}, ...]
+    """
+    dates = []
+    stocks = []
+    try:
+        wb = openpyxl.load_workbook(filename)
+        if INDEX_SHEET_NAME not in wb.sheetnames:
+            return [], []
+        sheet = wb[INDEX_SHEET_NAME]
+
+        raw_dates = [sheet.cell(row=1, column=col).value for col in range(3, sheet.max_column + 1)]
+        for d in raw_dates:
+            if d is None:
+                continue
+            digits = "".join(ch for ch in str(d) if ch.isdigit())
+            if len(digits) == 8:
+                if digits not in dates:
+                    dates.append(digits)
+
+        for row in range(2, sheet.max_row + 1):
+            name = sheet.cell(row=row, column=1).value
+            code = sheet.cell(row=row, column=2).value
+            if not name or not code:
+                continue
+            code_str = str(code).strip()
+            if code_str.isdigit():
+                code_str = code_str.zfill(6)
+            prices = [sheet.cell(row=row, column=col).value for col in range(3, sheet.max_column + 1)]
+            prices_numeric = []
+            for p in prices:
+                try:
+                    prices_numeric.append(float(p) if p not in (None, '') else None)
+                except (ValueError, TypeError):
+                    prices_numeric.append(None)
+            stocks.append({'name': str(name), 'code': code_str, 'prices': prices_numeric})
+    except Exception as e:
+        print(f"⚠ 지수 시트 로딩 중 오류: {e}")
     return dates, stocks
 
 
@@ -200,11 +249,11 @@ def get_existing_dates(sheet):
     return dates
 
 
-def ensure_metric_sheet(wb, sheet_name, stocks):
+def ensure_metric_sheet(wb, sheet_name, stocks, name_header="종목명", code_header="종목코드"):
     if sheet_name not in wb.sheetnames:
         sheet = wb.create_sheet(sheet_name)
-        sheet.cell(row=1, column=1, value='종목명')
-        sheet.cell(row=1, column=2, value='종목코드')
+        sheet.cell(row=1, column=1, value=name_header)
+        sheet.cell(row=1, column=2, value=code_header)
         sheet.cell(row=1, column=1).font = HEADER_FONT
         sheet.cell(row=1, column=2).font = HEADER_FONT
         sheet.cell(row=1, column=1).fill = HEADER_FILL
@@ -222,8 +271,8 @@ def ensure_metric_sheet(wb, sheet_name, stocks):
     sheet = wb[sheet_name]
     existing_dates = get_existing_dates(sheet)
 
-    sheet.cell(row=1, column=1, value='종목명').font = HEADER_FONT
-    sheet.cell(row=1, column=2, value='종목코드').font = HEADER_FONT
+    sheet.cell(row=1, column=1, value=name_header).font = HEADER_FONT
+    sheet.cell(row=1, column=2, value=code_header).font = HEADER_FONT
     sheet.cell(row=1, column=1).fill = HEADER_FILL
     sheet.cell(row=1, column=2).fill = HEADER_FILL
 
@@ -292,14 +341,16 @@ def append_metric_columns(sheet, code_to_row, stock_map, existing_count, valid_d
 # 4. GAP 시트 전체 재계산 저장
 # =========================
 
-def save_gap_sheet(filename, dates, stocks, window=20, sheet_name='gap'):
+def save_gap_sheet(filename, dates, stocks, window=20, sheet_name='gap',
+                   name_header="종목명", code_header="종목코드"):
     if len(dates) < window:
         print(f"⚠ GAP: 날짜가 {window}일보다 적습니다. ({filename})")
         return
 
     valid_dates = dates[window - 1:]
     wb = load_or_create_workbook(filename)
-    sheet, existing_dates, code_to_row, new_codes = ensure_metric_sheet(wb, sheet_name, stocks)
+    sheet, existing_dates, code_to_row, new_codes = ensure_metric_sheet(
+        wb, sheet_name, stocks, name_header=name_header, code_header=code_header)
 
     stock_map = {}
     for stock in stocks:
@@ -337,14 +388,16 @@ def save_gap_sheet(filename, dates, stocks, window=20, sheet_name='gap'):
 # 5. QUANT 시트 전체 재계산 저장
 # =========================
 
-def save_quant_sheet(filename, dates, stocks, window=60, sheet_name='quant'):
+def save_quant_sheet(filename, dates, stocks, window=60, sheet_name='quant',
+                     name_header="종목명", code_header="종목코드"):
     if len(dates) < window:
         print(f"⚠ QUANT: 날짜가 {window}일보다 적습니다. ({filename})")
         return
 
     valid_dates = dates[window - 1:]
     wb = load_or_create_workbook(filename)
-    sheet, existing_dates, code_to_row, new_codes = ensure_metric_sheet(wb, sheet_name, stocks)
+    sheet, existing_dates, code_to_row, new_codes = ensure_metric_sheet(
+        wb, sheet_name, stocks, name_header=name_header, code_header=code_header)
 
     stock_map = {}
     for stock in stocks:
@@ -382,7 +435,8 @@ def save_quant_sheet(filename, dates, stocks, window=60, sheet_name='quant'):
 # 6. STD 시트 전체 재계산 저장
 # =========================
 
-def save_std_sheet(filename, dates, stocks, sheet_name='std', window_std=20, window_mean=20):
+def save_std_sheet(filename, dates, stocks, sheet_name='std', window_std=20, window_mean=20,
+                   name_header="종목명", code_header="종목코드"):
     min_idx = window_std + window_mean - 2
     if len(dates) <= min_idx:
         print(f"⚠ STD: 데이터가 부족합니다. ({filename})")
@@ -390,7 +444,8 @@ def save_std_sheet(filename, dates, stocks, sheet_name='std', window_std=20, win
 
     valid_dates = dates[min_idx:]
     wb = load_or_create_workbook(filename)
-    sheet, existing_dates, code_to_row, new_codes = ensure_metric_sheet(wb, sheet_name, stocks)
+    sheet, existing_dates, code_to_row, new_codes = ensure_metric_sheet(
+        wb, sheet_name, stocks, name_header=name_header, code_header=code_header)
 
     stock_map = {}
     for stock in stocks:
@@ -442,6 +497,33 @@ def run_extra_scores(filename):
         save_quant_sheet(filename, vol_dates, vol_stocks, window=60, sheet_name='quant')
     else:
         print("⚠ 거래량 데이터가 없어 QUANT 계산을 건너뜁니다.")
+
+    # 지수 기반 GAP/STD (KR_Stocks_Individual에만 적용)
+    if Path(filename).stem == INDEX_TARGET_STEM:
+        idx_dates, idx_stocks = get_index_data(filename)
+        if idx_dates and idx_stocks:
+            print("➡ 지수 기반 igap/istd 계산 시작")
+            save_gap_sheet(
+                filename,
+                idx_dates,
+                idx_stocks,
+                window=20,
+                sheet_name='igap',
+                name_header="업종명",
+                code_header="업종코드",
+            )
+            save_std_sheet(
+                filename,
+                idx_dates,
+                idx_stocks,
+                sheet_name='istd',
+                window_std=20,
+                window_mean=20,
+                name_header="업종명",
+                code_header="업종코드",
+            )
+        else:
+            print("⚠ 지수 데이터가 없어 igap/istd 계산을 건너뜁니다.")
 
     print(f"=== EXTRA SCORES 계산 완료: {filename} ===\n")
 
