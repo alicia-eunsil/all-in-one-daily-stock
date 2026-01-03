@@ -950,7 +950,15 @@ if "종가" in wb.sheetnames:
 
     if is_index_target and INDEX_SHEET_NAME in wb.sheetnames:
         ws_idx_raw = wb[INDEX_SHEET_NAME]
-        label_to_col_close = {label: col_idx for col_idx, raw, dt, label in selected_close_infos}
+        # 지수 시트의 날짜 헤더를 직접 매핑해 종가 시트와 동일한 라벨을 맞춘다.
+        label_to_col_close = {}
+        for col in range(3, ws_idx_raw.max_column + 1):
+            raw = ws_idx_raw.cell(row=1, column=col).value
+            if raw is None:
+                continue
+            lbl = format_excel_date(raw)
+            label_to_col_close[lbl] = col
+
         rows_raw = []
         for r in range(2, ws_idx_raw.max_row + 1):
             name = ws_idx_raw.cell(row=r, column=1).value
