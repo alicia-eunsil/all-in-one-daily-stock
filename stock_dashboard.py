@@ -552,7 +552,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
                 avg_idx_row = {"종목코드": "INDEX AVG", "종목명": "지수 평균"}
                 for lbl in selected_labels:
                     vals = [row["values"].get(lbl) for row in idx_rows]
-                    series = pd.to_numeric(vals, errors="coerce")
+                    series = pd.Series(pd.to_numeric(vals, errors="coerce"))
                     mean_val = series.mean(skipna=True)
                     avg_idx_row[lbl] = formatter(mean_val)
                 df_filtered.loc[len(df_filtered)] = avg_idx_row
