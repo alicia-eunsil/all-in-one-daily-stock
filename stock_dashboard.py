@@ -651,7 +651,7 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
         "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
     }
     for c in date_cols:
-        column_config[c] = st.column_config.TextColumn(c, width="medium")
+        column_config[c] = st.column_config.TextColumn(c, width="small")
 
     st.dataframe(
         df_display,
