@@ -976,7 +976,6 @@ if "종가" in wb.sheetnames:
 # 12. 지수(KOSPI/KOSDAQ/KOSPI200) 데이터 로딩
 # ======================================
 index_df = None
-index_close_rows = []
 
 if "지수" in wb.sheetnames and indicator_df is not None and selected_labels:
     ws_idx = wb["지수"]
