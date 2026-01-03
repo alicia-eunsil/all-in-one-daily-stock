@@ -626,17 +626,6 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
     # 컬럼 순서 고정
     df_raw = df_raw[["종목코드", "종목명"] + date_cols]
 
-    # 날짜 컬럼 숫자 변환
-    column_config = {
-        "종목코드": st.column_config.TextColumn("종목코드", width="small", pinned="left"),
-        "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
-    }
-    for c in date_cols:
-        df_raw[c] = pd.to_numeric(df_raw[c], errors="coerce")
-        has_decimal = df_raw[c].dropna().apply(lambda v: not float(v).is_integer()).any()
-        number_format = "%.2f" if has_decimal else "%.0f"
-        column_config[c] = st.column_config.NumberColumn(c, format=number_format)
-
     if index_close_rows:
         for row in index_close_rows:
             new_row = {"종목코드": row.get("업종코드", ""), "종목명": row.get("업종명", "")}
@@ -644,8 +633,28 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
                 new_row[c] = row.get(c, None)
             df_raw.loc[len(df_raw)] = new_row
 
+    # 표시는 문자열로 분기 포맷팅: 종목은 정수, 지수는 소수 둘째자리
+    index_codes = {str(r.get("업종코드", "")) for r in index_close_rows} if index_close_rows else set()
+    df_display = df_raw.copy()
+    for idx, row in df_display.iterrows():
+        is_index_row = str(row["종목코드"]) in index_codes
+        for c in date_cols:
+            num = pd.to_numeric(row[c], errors="coerce")
+            if pd.isna(num):
+                row[c] = "-"
+            else:
+                row[c] = f"{num:.2f}" if is_index_row else f"{num:.0f}"
+        df_display.loc[idx] = row
+
+    column_config = {
+        "종목코드": st.column_config.TextColumn("종목코드", width="small", pinned="left"),
+        "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
+    }
+    for c in date_cols:
+        column_config[c] = st.column_config.TextColumn(c, width="medium")
+
     st.dataframe(
-        df_raw,
+        df_display,
         width="stretch",
         height=600,
         hide_index=True,
