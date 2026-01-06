@@ -1,8 +1,8 @@
 """
 File: stock_dashboard.py
-Version: v3.0.0
+Version: v4.0.0
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
-# 메모: v3.0.0 - KR_Stocks_Individual 지수(is/iz/igap/istd) 데이터를 종합/지표별/원자료 뷰에 표시하도록 확장
+# 메모: v4.0.0 - 강조 로직 색상 기반 정리, 불필요 함수 정리
 """
 
 import streamlit as st
@@ -63,7 +63,8 @@ if "show_days_raw" not in st.session_state:
     st.session_state.show_days_raw = 10  # 시작: 최근 10일
 
 # 🔥 파일 선택 상태
-JSON_PATH = "stock_file_map.json"
+BASE_DIR = Path(__file__).resolve().parent
+JSON_PATH = BASE_DIR / "stock_file_map.json"
 EXCEL_MAP = {}
 INDEX_SHEET_NAME = "지수"
 if "selected_category" not in st.session_state:
@@ -157,50 +158,62 @@ def _format_s_cell(v):
     return out
 
 
-def _format_q_cell(v):
-    val = pd.to_numeric(v, errors="coerce")
-    if pd.isna(val):
-        return "-"
-    out = f"{val:.0f}"
-    if val > 100:
-        out += " 🔴"
-    elif val < 25:
-        out += " 🔵"
-    return out
-
-
-GAP_EMOJI_WINDOW = 20
-STD_EMOJI_WINDOW = 20
-
-
-def _apply_extrema_emojis(df, columns, window, fmt):
+def _highlight_top_bottom_cells(df_or_styler, columns, top_n=10, high_color="#ffe0e0", low_color="#e0ecff"):
+    """
+    각 컬럼에서 상위/하위 N개에 배경색을 칠한 Styler 반환.
+    컬럼 값이 문자열이어도 to_numeric으로 비교.
+    """
     if not columns:
-        return
-    consider_cols = columns[-window:]
-    for idx in df.index:
-        numeric_vals = pd.to_numeric(df.loc[idx, consider_cols], errors="coerce").dropna()
-        if numeric_vals.empty:
-            continue
-        max_val = numeric_vals.max()
-        min_val = numeric_vals.min()
-        for col in consider_cols:
-            val = pd.to_numeric(df.at[idx, col], errors="coerce")
-            if pd.isna(val):
+        return df_or_styler
+
+    styler = df_or_styler if hasattr(df_or_styler, "apply") else df_or_styler.style
+
+    def _style(col):
+        styles = [""] * len(col)
+        series = pd.to_numeric(col, errors="coerce")
+        valid = series.dropna()
+        if valid.empty:
+            return styles
+        n_use = min(top_n, len(valid))
+        top_idx = set(valid.nlargest(n_use).index)
+        bottom_idx = set(valid.nsmallest(n_use).index)
+        for i, idx in enumerate(col.index):
+            if idx in top_idx:
+                styles[i] = f"background-color: {high_color}; color: red"
+            elif idx in bottom_idx:
+                styles[i] = f"background-color: {low_color}; color: blue"
+        return styles
+
+    for col in columns:
+        styler = styler.apply(_style, subset=pd.IndexSlice[:, col])
+    return styler
+
+
+def _highlight_threshold(df_or_styler, columns, high_cond, low_cond, high_color="#ffe0e0", low_color="#e0ecff"):
+    """
+    조건부(상/하)로 색을 입힌 Styler 반환.
+    """
+    if not columns:
+        return df_or_styler
+
+    styler = df_or_styler if hasattr(df_or_styler, "apply") else df_or_styler.style
+
+    def _style(col):
+        styles = [""] * len(col)
+        for i, val in enumerate(col):
+            try:
+                num = float(val)
+            except:
                 continue
-            suffix = ""
-            if val == max_val:
-                suffix = " 🔴"
-            elif val == min_val:
-                suffix = " 🔵"
-            df.at[idx, col] = f"{val:{fmt}}{suffix}"
+            if high_cond(num):
+                styles[i] = f"background-color: {high_color}; color: red"
+            elif low_cond(num):
+                styles[i] = f"background-color: {low_color}; color: blue"
+        return styles
 
-
-def _apply_gap_emojis(df, columns, window=GAP_EMOJI_WINDOW):
-    _apply_extrema_emojis(df, columns, window, ".0f")
-
-
-def _apply_std_emojis(df, columns, window=STD_EMOJI_WINDOW):
-    _apply_extrema_emojis(df, columns, window, ".2f")
+    for col in columns:
+        styler = styler.apply(_style, subset=pd.IndexSlice[:, col])
+    return styler
 
 
 def _load_index_metric_data(wb, selected_labels):
@@ -356,30 +369,16 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # Z/S/Q/GAP 포맷 이모지 적용
     # --------------------------------------
     for lbl in selected_labels:
-        for m in ["Z20", "Z60", "Z120"]:
+        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP", "STD", "QUANT"]:
             col = (lbl, m)
-            if col in df_show.columns:
-                df_show[col] = df_show[col].apply(_format_z_cell)
-
-        for m in ["S20", "S60", "S120"]:
-            col = (lbl, m)
-            if col in df_show.columns:
-                df_show[col] = df_show[col].apply(_format_s_cell)
-
-        for metric in ["GAP", "STD"]:
-            col = (lbl, metric)
             if col in df_show.columns:
                 df_show[col] = pd.to_numeric(df_show[col], errors="coerce")
 
-        for m in ["QUANT"]:
-            col = (lbl, m)
-            if col in df_show.columns:
-                df_show[col] = df_show[col].apply(_format_q_cell)
-
+    z_columns_total = [(lbl, m) for lbl in selected_labels for m in ["Z20", "Z60", "Z120"] if (lbl, m) in df_show.columns]
+    s_columns_total = [(lbl, m) for lbl in selected_labels for m in ["S20", "S60", "S120"] if (lbl, m) in df_show.columns]
     gap_columns_total = [(lbl, "GAP") for lbl in selected_labels if (lbl, "GAP") in df_show.columns]
-    _apply_gap_emojis(df_show, gap_columns_total)
     std_columns_total = [(lbl, "STD") for lbl in selected_labels if (lbl, "STD") in df_show.columns]
-    _apply_std_emojis(df_show, std_columns_total)
+    quant_columns_total = [(lbl, "QUANT") for lbl in selected_labels if (lbl, "QUANT") in df_show.columns]
 
     # --------------------------------------
     # 🔽 지수(KOSPI/KOSDAQ/KOSPI200) 행 추가 (레거시, 지수 지표 데이터 없을 때)
@@ -408,8 +407,35 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # 인덱스 설정 (종목코드·종목명)
     df_show = df_show.set_index([("", "종목코드"), ("", "종목명")])
 
+    # 숫자 포맷 적용
+    fmt_map = {}
+    for col in (z_columns_total + s_columns_total + gap_columns_total + quant_columns_total):
+        fmt_map[col] = "{:.0f}"
+    for col in std_columns_total:
+        fmt_map[col] = "{:.2f}"
+
+    styler = df_show.style.format(fmt_map, na_rep="-")
+
+    # 강조 색상 적용
+    if gap_columns_total:
+        styler = _highlight_top_bottom_cells(styler, gap_columns_total, top_n=10)
+    if std_columns_total:
+        styler = _highlight_top_bottom_cells(styler, std_columns_total, top_n=10)
+    if z_columns_total:
+        styler = _highlight_threshold(styler, z_columns_total,
+                                      high_cond=lambda v: v > 100,
+                                      low_cond=lambda v: v < -100)
+    if s_columns_total:
+        styler = _highlight_threshold(styler, s_columns_total,
+                                      high_cond=lambda v: abs(v - 100) < 0.1,
+                                      low_cond=lambda v: abs(v - 0) < 0.1)
+    if quant_columns_total:
+        styler = _highlight_threshold(styler, quant_columns_total,
+                                      high_cond=lambda v: v > 100,
+                                      low_cond=lambda v: v < 25)
+
     st.dataframe(
-        df_show,
+        styler,
         width="stretch",
         height=600,
     )
@@ -462,34 +488,10 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
         else:
             df_metric_numeric[lbl] = None
 
-    # 값 포맷팅
-    def _format_plain(v):
-        val = pd.to_numeric(v, errors="coerce")
-        if pd.isna(val):
-            return "-"
-        return f"{val:.0f}"
-
-    def _format_std_cell(v):
-        val = pd.to_numeric(v, errors="coerce")
-        if pd.isna(val):
-            return "-"
-        return f"{val:.2f}"
-
-    if metric == "STD":
-        formatter = _format_std_cell
-    elif metric.startswith("S"):
-        formatter = _format_s_cell
-    elif metric.startswith("Z"):
-        formatter = _format_z_cell
-    elif metric == "QUANT":
-        formatter = _format_q_cell
-    else:
-        formatter = _format_plain
-
-    df_metric_display = df_metric_numeric.copy()
+    # 숫자 변환
     for lbl in selected_labels:
-        if lbl in df_metric_display.columns:
-            df_metric_display[lbl] = df_metric_display[lbl].apply(formatter)
+        if lbl in df_metric_numeric.columns:
+            df_metric_numeric[lbl] = pd.to_numeric(df_metric_numeric[lbl], errors="coerce")
 
     # 🔍 필터 + 정렬
     st.markdown("### 🔍 필터 옵션 (지표별)")
@@ -499,7 +501,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     with c2:
         sort_metric = st.selectbox("정렬 기준", ["종목코드", "종목명"], key="sort_metric")
 
-    df_filtered_display = df_metric_display.copy()
+    df_filtered_display = df_metric_numeric.copy()
     df_filtered_numeric = df_metric_numeric.copy()
     if search_metric:
         mask = (
@@ -513,12 +515,12 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     df_filtered_display = df_filtered_display.loc[sort_order].reset_index(drop=True)
     df_filtered_numeric = df_filtered_numeric.loc[sort_order].reset_index(drop=True)
 
+    gap_columns_metric = []
+    std_columns_metric = []
     if metric == "GAP":
         gap_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
-        _apply_gap_emojis(df_filtered_display, gap_columns_metric)
     elif metric == "STD":
         std_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
-        _apply_std_emojis(df_filtered_display, std_columns_metric)
 
     # 평균 행 추가
     avg_row = {"종목코드": "AVG", "종목명": "평균"}
@@ -527,10 +529,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             continue
         col_numeric = pd.to_numeric(df_filtered_numeric[lbl], errors="coerce")
         mean_val = col_numeric.mean(skipna=True)
-        if pd.isna(mean_val):
-            avg_row[lbl] = "-"
-        else:
-            avg_row[lbl] = formatter(mean_val)
+        avg_row[lbl] = mean_val if pd.notna(mean_val) else None
 
     df_filtered = df_filtered_display.copy()
     df_filtered.loc[len(df_filtered)] = avg_row
@@ -542,7 +541,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             for row in idx_rows:
                 rec = {"종목코드": row["code"], "종목명": row["name"]}
                 for lbl in selected_labels:
-                    rec[lbl] = formatter(row["values"].get(lbl))
+                    rec[lbl] = pd.to_numeric(row["values"].get(lbl), errors="coerce")
                 idx_display_records.append(rec)
 
             if idx_display_records:
@@ -554,7 +553,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
                     vals = [row["values"].get(lbl) for row in idx_rows]
                     series = pd.Series(pd.to_numeric(vals, errors="coerce"))
                     mean_val = series.mean(skipna=True)
-                    avg_idx_row[lbl] = formatter(mean_val)
+                    avg_idx_row[lbl] = mean_val
                 df_filtered.loc[len(df_filtered)] = avg_idx_row
 
     # 날짜 범위 안내
@@ -575,10 +574,26 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     }
     for lbl in selected_labels:
         if lbl in df_filtered.columns:
-            column_config[lbl] = st.column_config.TextColumn(lbl)
+            column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric == "STD" else "%.0f")
+
+    # 스타일 (색상 강조)
+    styler = df_filtered.style.format({lbl: ("{:.2f}" if metric == "STD" else "{:.0f}") for lbl in selected_labels}, na_rep="-")
+    if metric == "GAP":
+        styler = _highlight_top_bottom_cells(styler, gap_columns_metric, top_n=10)
+    elif metric == "STD":
+        styler = _highlight_top_bottom_cells(styler, std_columns_metric, top_n=10)
+    elif metric.startswith("Z"):
+        styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
+                                      high_cond=lambda v: v > 100, low_cond=lambda v: v < -100)
+    elif metric.startswith("S"):
+        styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
+                                      high_cond=lambda v: abs(v - 100) < 0.1, low_cond=lambda v: abs(v - 0) < 0.1)
+    elif metric == "QUANT":
+        styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
+                                      high_cond=lambda v: v > 100, low_cond=lambda v: v < 25)
 
     st.dataframe(
-        df_filtered,
+        styler,
         width="stretch",
         height=600,
         hide_index=True,
@@ -674,19 +689,20 @@ try:
     with open(JSON_PATH, "r", encoding="utf-8") as f:
         EXCEL_MAP = json.load(f)
     if not isinstance(EXCEL_MAP, dict) or not EXCEL_MAP:
-        st.error("stock_files.json 형식이 잘못되었거나 비어 있습니다.")
+        st.error("stock_file_map.json 형식이 잘못되었거나 비어 있습니다.")
         st.stop()
 except FileNotFoundError:
-    st.error("stock_files.json 파일을 찾을 수 없습니다.")
+    st.error(f"stock_file_map.json 파일을 찾을 수 없습니다. 위치: {JSON_PATH}")
     st.stop()
 except Exception as e:
-    st.error(f"stock_files.json 읽기 오류: {e}")
+    st.error(f"stock_file_map.json 읽기 오류: {e}")
     st.stop()
 
 categories = list(EXCEL_MAP.keys())
 if not categories:
     st.error("stock_file_map.json 에 항목이 없습니다.")
     st.stop()
+    sys.exit(1)  # streamlit 외 환경에서 실행될 때 안전 종료
 
 if st.session_state.selected_category not in categories:
     st.session_state.selected_category = categories[0]
@@ -705,7 +721,7 @@ selected_category = st.radio(
 )
 st.session_state.selected_category = selected_category
 selected_filename = EXCEL_MAP[selected_category]
-excel_path = Path(selected_filename)
+excel_path = (BASE_DIR / selected_filename).resolve()
 is_index_target = excel_path.stem == "KR_Stocks_Individual"
 
 #st.markdown(f"#### 현재: `{selected_category}`")
