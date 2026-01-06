@@ -714,6 +714,15 @@ is_index_target = excel_path.stem == "KR_Stocks_Individual"
 # 6. 사이드바: 선택 파일 다운로드 + 전체 갱신 버튼
 # ======================================
 with st.sidebar:
+    # 🔄 최신 데이터 수동 새로고침 (git pull 후 캐시 초기화)
+    if st.button("🔄 데이터 새로고침", key="refresh_git_pull"):
+        try:
+            subprocess.run(["git", "pull", "--rebase"], check=True)
+        except Exception as e:
+            st.error(f"git pull 실패: {e}")
+        st.cache_data.clear()
+        st.rerun()
+
     st.markdown("### 📁 현재 선택 파일")
     st.write(f"`{selected_filename}`")
 
