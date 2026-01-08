@@ -27,10 +27,10 @@ jobs:
           pip install openpyxl
 
       # 중요: 여기서 --file / --sheet / --start_col / --end_col 을 절대 넘기지 않습니다.
-      # 스크립트는 리포 루트에 있으므로 루트에서 실행합니다.
+      # 스크립트는 `#Version2_broad_` 폴더 아래 있으므로 해당 경로로 실행합니다.
       - name: Run delete script (use script defaults)
         run: |
-          python delete_excel_columns.py
+          python "#Version2_broad_/delete_excel_columns.py"
 
       - name: Commit and push changes (if any)
         run: |
