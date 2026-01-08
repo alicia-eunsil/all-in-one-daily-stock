@@ -1,6 +1,4 @@
-# .github/workflows/delete-excel-columns.yml
-# 목적: GitHub Actions에서 입력 인자 없이 실행하여,
-#      파이썬 스크립트(delete_excel_columns.py)의 DEFAULT_* 값을 그대로 사용함.
+# 목적: 입력 인자 없이 delete_excel_columns.py를 기본값(DEFAULT_*) 그대로 실행한다.
 
 name: Delete Excel Columns (Defaults Only)
 
@@ -29,13 +27,11 @@ jobs:
           pip install openpyxl
 
       # 중요: 여기서 --file / --sheet / --start_col / --end_col 을 절대 넘기지 않습니다.
-      # 따라서 스크립트의 DEFAULT_FILE/DEFAULT_SHEET/DEFAULT_START_COL/DEFAULT_END_COL 이 적용됩니다.
+      # 스크립트가 리포 루트에 있으므로 상대경로로 실행합니다.
       - name: Run delete script (use script defaults)
         run: |
-          python scripts/delete_excel_columns.py
+          python delete_excel_columns.py
 
-      # 변경된 엑셀 파일을 레포에 반영하려면 커밋/푸시가 필요합니다.
-      # (삭제 작업은 워크스페이스 파일을 바꾸는 것이라, 푸시하지 않으면 레포에 남지 않습니다.)
       - name: Commit and push changes (if any)
         run: |
           if git diff --quiet; then
