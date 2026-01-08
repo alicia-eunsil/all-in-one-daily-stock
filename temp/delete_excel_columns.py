@@ -9,8 +9,7 @@ from pathlib import Path
 import openpyxl
 from openpyxl.utils import column_index_from_string
 
-
-BASE_DIR = Path(__file__).resolve().parents[1]  # repo root
+BASE_DIR = Path(__file__).resolve().parent  # repo root
 DEFAULT_FILE = BASE_DIR / "KR_Stocks_ETF.xlsx"
 DEFAULT_SHEET = "std"
 DEFAULT_START_COL = "AS"  # 필요에 맞게 수정
