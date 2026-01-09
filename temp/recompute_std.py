@@ -27,15 +27,16 @@ def normalize_code(value):
     return digits.zfill(6)
 
 BASE_DIR = Path(__file__).resolve().parent  # 스크립트가 있는 폴더
+# 대상 파일 경로 후보 ((std) 붙은 파일만 탐색)
 EXCEL_CANDIDATES = [
-    BASE_DIR / "KR_Stocks_ETF.xlsx",        # 스크립트와 같은 폴더에 있는 경우
-    BASE_DIR.parent / "KR_Stocks_ETF.xlsx", # 상위(리포 루트)에 있는 경우
+    BASE_DIR / "KR_Stocks_ETF.xlsx",        # 스크립트와 같은 폴더
+    BASE_DIR.parent / "KR_Stocks_ETF.xlsx", # 상위(리포 루트)
 ]
 STD_SHEET = "std"
 PRICE_SHEET = "종가"
 WINDOW = 20
 RECENT_DAYS = 20
-START_DATE_LABEL = 20251229  # YYYYMMDD 기준 재계산 시작 지점
+START_DATE_LABEL = 20251226  # YYYYMMDD 기준 재계산 시작 지점
 
 
 def load_std_sheet(path: Path):
@@ -120,7 +121,7 @@ def recompute_std(values: np.ndarray) -> float:
     return float(val)
 
 
-def update_recent_std(df: pd.DataFrame, date_columns, price_matrix, label_positions, start_label=None):
+def update_recent_std(df: pd.DataFrame, date_columns, price_matrix, label_positions, start_label=None, verbose=False):
     normalized_labels = [format_date_label(col) for col in date_columns]
 
     start_index = max(0, len(date_columns) - RECENT_DAYS)
@@ -135,12 +136,19 @@ def update_recent_std(df: pd.DataFrame, date_columns, price_matrix, label_positi
                 break
 
     codes = df["종목코드"].tolist()
+    if verbose:
+        target_cols = date_columns[start_index:]
+        print(f"▶ STD 재계산 시작 (start_label={start_label}, start_index={start_index}, 대상 컬럼 수={len(target_cols)})")
 
+    skipped_cols = 0
     for idx_col in range(start_index, len(date_columns)):
         raw_label = date_columns[idx_col]
         norm_label = normalized_labels[idx_col]
         pos = label_positions.get(norm_label)
         if pos is None:
+            if verbose:
+                print(f"  - 스킵: {raw_label} (정규 라벨 {norm_label} 위치를 찾을 수 없음)")
+            skipped_cols += 1
             continue
 
         # 기존 데이터를 비운 후 새 값으로 채움
@@ -159,6 +167,15 @@ def update_recent_std(df: pd.DataFrame, date_columns, price_matrix, label_positi
         mask = ~np.isnan(new_values)
         new_values[mask] = np.round(new_values[mask], 2)
         df[raw_label] = new_values
+
+        if verbose:
+            print(
+                f"  - 완료: {raw_label} (pos={pos}) "
+                f"재계산 {int(mask.sum())}건 / NaN {int(len(new_values) - mask.sum())}건"
+            )
+
+    if verbose:
+        print(f"▶ 재계산 완료: 처리 컬럼 {len(date_columns) - start_index - skipped_cols}, 스킵 {skipped_cols}")
 
     return df
 
@@ -193,6 +210,19 @@ def normalize_date_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns=renamed)
 
 
+def align_std_columns(df: pd.DataFrame, close_labels):
+    """
+    STD 시트 컬럼을 종가 시트 날짜에 맞춰 확장/정렬한다.
+    부족한 날짜 컬럼이 있으면 NaN으로 추가하고, 종가 순서대로 재배치한다.
+    """
+    std_cols = [c for c in df.columns if c not in ("종목명", "종목코드")]
+    need_add = [lbl for lbl in close_labels if lbl not in std_cols]
+    for lbl in need_add:
+        df[lbl] = np.nan
+    ordered_cols = ["종목명", "종목코드"] + close_labels
+    return df[ordered_cols], close_labels
+
+
 def overwrite_std_sheet(path: Path, df: pd.DataFrame):
     """openpyxl로 STD 시트를 안전하게 덮어쓰기"""
     try:
@@ -224,14 +254,23 @@ def main():
             break
     if excel_path is None:
         raise FileNotFoundError(f"KR_Stocks_ETF.xlsx 파일을 찾을 수 없습니다. (확인한 경로: {EXCEL_CANDIDATES})")
+    print(f"📄 사용 파일: {excel_path}")
 
-    df = load_std_sheet(excel_path)
+    # STD 시트의 날짜 헤더를 정규화(YYYYMMDD)해서 가격 시트와 매칭되도록 보정
+    df = normalize_date_columns(load_std_sheet(excel_path))
     price_matrix, close_labels = load_close_prices(excel_path)
     label_positions = {lbl: idx for idx, lbl in enumerate(close_labels)}
+    std_date_cols = [c for c in df.columns if c not in ("종목명", "종목코드")]
+    print(f"📅 STD 컬럼 수: {len(std_date_cols)}, 종가 날짜 수: {len(close_labels)}")
+    if std_date_cols:
+        print(f"   STD 날짜 범위: {std_date_cols[0]} ~ {std_date_cols[-1]}")
+    if close_labels:
+        print(f"   종가 날짜 범위: {close_labels[0]} ~ {close_labels[-1]}")
 
-    date_cols = [c for c in df.columns if c not in ("종목명", "종목코드")]
+    # STD 컬럼을 종가 날짜에 맞춰 확장/정렬
+    df, date_cols = align_std_columns(df, close_labels)
     if len(date_cols) < WINDOW:
-        raise ValueError(f"날짜 열이 {WINDOW}개 이상 필요합니다.")
+        raise ValueError(f"날짜 열이 {WINDOW}개 이상 필요합니다. (현재 {len(date_cols)})")
 
     updated = update_recent_std(
         df.copy(),
@@ -239,6 +278,7 @@ def main():
         price_matrix,
         label_positions,
         start_label=START_DATE_LABEL,
+        verbose=True,
     )
     updated = normalize_date_columns(updated)
     if "종목코드" in updated.columns:
