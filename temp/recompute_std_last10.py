@@ -26,13 +26,13 @@ def normalize_code(value):
         return s
     return digits.zfill(6)
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # repo root
-EXCEL_PATH = BASE_DIR / "KR_Stocks_Individual.xlsx"
+BASE_DIR = Path(__file__).resolve().parent
+EXCEL_PATH = BASE_DIR / "KR_Stocks_ETF.xlsx"
 STD_SHEET = "std"
 PRICE_SHEET = "종가"
 WINDOW = 20
 RECENT_DAYS = 20
-START_DATE_LABEL = 20251212  # YYYYMMDD 기준 재계산 시작 지점
+START_DATE_LABEL = 20251229  # YYYYMMDD 기준 재계산 시작 지점
 
 
 def load_std_sheet(path: Path):
@@ -73,18 +73,24 @@ def load_close_prices(path: Path):
 
 def recompute_std(values: np.ndarray) -> float:
     """
-    extra_scores.py의 기존 STD 공식:
-    - window_std=20, window_mean=20을 가정하고
-      최근 20일 표준편차 대비 과거 20일 평균 표준편차 증감률을 계산
+    extra_scores.py의 calc_std_value와 동일한 산식:
+    - idx 시점(마지막 값)에서 window_std=20 롤링 σ 계산
+    - 과거 window_mean=20 동안의 σ 평균 대비 증감률 * 100
+    - 소수 둘째 자리 반올림
     """
     window_std = WINDOW
     window_mean = WINDOW
-    if len(values) < window_std + window_mean - 1:
+    min_len = window_std + window_mean - 1
+    if len(values) < min_len:
+        return np.nan
+
+    idx = len(values) - 1
+    min_idx = window_std + window_mean - 2
+    if idx < min_idx:
         return np.nan
 
     std_list = []
-    start_j = len(values) - window_mean
-    for j in range(start_j, len(values)):
+    for j in range(idx - window_mean + 1, idx + 1):  # j: idx-19 ~ idx
         start = j - window_std + 1
         end = j + 1
         if start < 0:
@@ -95,7 +101,7 @@ def recompute_std(values: np.ndarray) -> float:
             return np.nan
 
         arr = np.array(window_prices, dtype=float)
-        sigma = float(np.std(arr, ddof=0))
+        sigma = float(np.std(arr, ddof=0))  # 모표준편차
         std_list.append(sigma)
 
     if not std_list:
@@ -104,7 +110,7 @@ def recompute_std(values: np.ndarray) -> float:
     std_today = std_list[-1]
     avg_std = sum(std_list) / len(std_list)
     if avg_std == 0:
-        return 0
+        return 0.0
 
     raw_val = (std_today / avg_std - 1) * 100
     val = Decimal(str(raw_val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -246,4 +252,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
