@@ -1,8 +1,8 @@
 """
 File: stock_dashboard.py
-Version: v4.0.0
+Version: v4.0.1
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
-# 메모: v4.0.0 - 강조 로직 색상 기반 정리, 불필요 함수 정리
+# 메모: v4.0.1 - GAP/STD 상하위 강조 시 평균·지수 행 제외 + 동률 포함, 불필요 포맷 함수 제거
 """
 
 import streamlit as st
@@ -134,34 +134,11 @@ def format_excel_date(v):
     return s
 
 
-def _format_z_cell(v):
-    val = pd.to_numeric(v, errors="coerce")
-    if pd.isna(val):
-        return "-"
-    out = f"{val:.0f}"
-    if val > 100:
-        out += " 🔴"
-    elif val < -100:
-        out += " 🔵"
-    return out
-
-
-def _format_s_cell(v):
-    val = pd.to_numeric(v, errors="coerce")
-    if pd.isna(val):
-        return "-"
-    out = f"{val:.0f}"
-    if abs(val - 100) < 0.1:
-        out += " 🔴"
-    elif abs(val - 0) < 0.1:
-        out += " 🔵"
-    return out
-
-
-def _highlight_top_bottom_cells(df_or_styler, columns, top_n=10, high_color="#ffe0e0", low_color="#e0ecff"):
+def _highlight_top_bottom_cells(df_or_styler, columns, top_n=10, high_color="#ffe0e0", low_color="#e0ecff", allowed_mask=None):
     """
     각 컬럼에서 상위/하위 N개에 배경색을 칠한 Styler 반환.
     컬럼 값이 문자열이어도 to_numeric으로 비교.
+    동률(같은 값)은 cutoff 값과 같으면 모두 포함한다.
     """
     if not columns:
         return df_or_styler
@@ -171,12 +148,20 @@ def _highlight_top_bottom_cells(df_or_styler, columns, top_n=10, high_color="#ff
     def _style(col):
         styles = [""] * len(col)
         series = pd.to_numeric(col, errors="coerce")
-        valid = series.dropna()
+        if allowed_mask is not None:
+            mask_use = allowed_mask.reindex(col.index, fill_value=False)
+        else:
+            mask_use = pd.Series(True, index=col.index)
+        valid = series[mask_use].dropna()
         if valid.empty:
             return styles
         n_use = min(top_n, len(valid))
-        top_idx = set(valid.nlargest(n_use).index)
-        bottom_idx = set(valid.nsmallest(n_use).index)
+        top_vals = valid.nlargest(n_use)
+        bottom_vals = valid.nsmallest(n_use)
+        top_cut = top_vals.min()
+        bottom_cut = bottom_vals.max()
+        top_idx = set(valid[valid >= top_cut].index)
+        bottom_idx = set(valid[valid <= bottom_cut].index)
         for i, idx in enumerate(col.index):
             if idx in top_idx:
                 styles[i] = f"background-color: {high_color}; color: red"
@@ -416,11 +401,19 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
 
     styler = df_show.style.format(fmt_map, na_rep="-")
 
+    # 강조 색상 적용 (AVG / 지수 행 제외)
+    disallow_codes = {"AVG", "INDEX AVG"}
+    if index_rows_df is not None and not index_rows_df.empty:
+        disallow_codes.update(index_rows_df[("", "종목코드")].astype(str))
+
+    mask_codes = ~df_show.index.get_level_values(0).astype(str).isin(disallow_codes)
+    allowed_mask_total = pd.Series(mask_codes, index=df_show.index)
+
     # 강조 색상 적용
     if gap_columns_total:
-        styler = _highlight_top_bottom_cells(styler, gap_columns_total, top_n=10)
+        styler = _highlight_top_bottom_cells(styler, gap_columns_total, top_n=10, allowed_mask=allowed_mask_total)
     if std_columns_total:
-        styler = _highlight_top_bottom_cells(styler, std_columns_total, top_n=10)
+        styler = _highlight_top_bottom_cells(styler, std_columns_total, top_n=10, allowed_mask=allowed_mask_total)
     if z_columns_total:
         styler = _highlight_threshold(styler, z_columns_total,
                                       high_cond=lambda v: v > 100,
@@ -534,6 +527,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     df_filtered = df_filtered_display.copy()
     df_filtered.loc[len(df_filtered)] = avg_row
 
+    idx_rows = []
     if index_metric_map and metric in index_metric_map:
         idx_rows = index_metric_map[metric]
         if idx_rows:
@@ -576,12 +570,28 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
         if lbl in df_filtered.columns:
             column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric == "STD" else "%.0f")
 
+    # 강조에서 평균/지수 행 제외
+    base_len = len(df_filtered_display)  # 순수 종목 행 개수
+    idx_count = len(idx_rows)
+    avg_row_idx = base_len  # 종목 평균 행
+    idx_start = base_len + 1
+    idx_end = base_len + idx_count
+    idx_avg_idx = base_len + idx_count + 1
+
+    allowed_mask = pd.Series(True, index=df_filtered.index)
+    if avg_row_idx < len(allowed_mask):
+        allowed_mask.iloc[avg_row_idx] = False
+    if idx_count:
+        allowed_mask.iloc[idx_start:idx_end + 1] = False
+        if idx_avg_idx < len(allowed_mask):
+            allowed_mask.iloc[idx_avg_idx] = False
+
     # 스타일 (색상 강조)
     styler = df_filtered.style.format({lbl: ("{:.2f}" if metric == "STD" else "{:.0f}") for lbl in selected_labels}, na_rep="-")
     if metric == "GAP":
-        styler = _highlight_top_bottom_cells(styler, gap_columns_metric, top_n=10)
+        styler = _highlight_top_bottom_cells(styler, gap_columns_metric, top_n=10, allowed_mask=allowed_mask)
     elif metric == "STD":
-        styler = _highlight_top_bottom_cells(styler, std_columns_metric, top_n=10)
+        styler = _highlight_top_bottom_cells(styler, std_columns_metric, top_n=10, allowed_mask=allowed_mask)
     elif metric.startswith("Z"):
         styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
                                       high_cond=lambda v: v > 100, low_cond=lambda v: v < -100)
