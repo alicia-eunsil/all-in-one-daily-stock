@@ -1,4 +1,4 @@
-name: Recompute STD last10 (KR_Stocks_Individual)
+name: Recompute STD last10 (KR_Stocks_ETF)
 
 on:
   workflow_dispatch:
@@ -26,15 +26,15 @@ jobs:
 
       - name: Run STD recompute script
         run: |
-          python temp/recompute_std_last10.py --input KR_Stocks_Individual.xlsx --sheet std
+          python temp/recompute_std_last10.py --input KR_Stocks_ETF.xlsx --sheet std
 
       - name: Commit and push (if changed)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git status --porcelain | grep -q "KR_Stocks_Individual.xlsx"; then
-            git add KR_Stocks_Individual.xlsx
+          if git status --porcelain | grep -q "KR_Stocks_ETF.xlsx"; then
+            git add KR_Stocks_ETF.xlsx
             git commit -m "Recompute STD sheet (last 10 days)"
             git push
           else
