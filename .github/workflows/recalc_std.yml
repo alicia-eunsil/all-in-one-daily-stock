@@ -1,4 +1,4 @@
-name: Recompute STD last10 (KR_Stocks_ETF)
+name: Recompute STD(KR_Stocks_ETF)
 
 on:
   workflow_dispatch:
@@ -26,7 +26,7 @@ jobs:
 
       - name: Run STD recompute script
         run: |
-          python temp/recompute_std_last10.py --input KR_Stocks_ETF.xlsx --sheet std
+          python temp/recompute_std.py --input KR_Stocks_ETF.xlsx --sheet std
 
       - name: Commit and push (if changed)
         run: |
@@ -35,7 +35,7 @@ jobs:
 
           if git status --porcelain | grep -q "KR_Stocks_ETF.xlsx"; then
             git add KR_Stocks_ETF.xlsx
-            git commit -m "Recompute STD sheet (last 10 days)"
+            git commit -m "Recompute STD sheet"
             git push
           else
             echo "No changes to commit."
