@@ -34,7 +34,7 @@ jobs:
 
       - name: Run set_cell_value script (use defaults)
         run: |
-          python set_cell_value.py
+          python temp/set_cell_value.py
 
       - name: Commit and push changes (if any)
         run: |
