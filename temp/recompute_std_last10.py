@@ -26,8 +26,11 @@ def normalize_code(value):
         return s
     return digits.zfill(6)
 
-BASE_DIR = Path(__file__).resolve().parent
-EXCEL_PATH = BASE_DIR / "KR_Stocks_ETF.xlsx"
+BASE_DIR = Path(__file__).resolve().parent  # 스크립트가 있는 폴더
+EXCEL_CANDIDATES = [
+    BASE_DIR / "KR_Stocks_ETF.xlsx",        # 스크립트와 같은 폴더에 있는 경우
+    BASE_DIR.parent / "KR_Stocks_ETF.xlsx", # 상위(리포 루트)에 있는 경우
+]
 STD_SHEET = "std"
 PRICE_SHEET = "종가"
 WINDOW = 20
@@ -214,11 +217,16 @@ def overwrite_std_sheet(path: Path, df: pd.DataFrame):
 
 
 def main():
-    if not EXCEL_PATH.exists():
-        raise FileNotFoundError(f"{EXCEL_PATH} 파일이 없습니다.")
+    excel_path = None
+    for cand in EXCEL_CANDIDATES:
+        if cand.exists():
+            excel_path = cand
+            break
+    if excel_path is None:
+        raise FileNotFoundError(f"KR_Stocks_ETF.xlsx 파일을 찾을 수 없습니다. (확인한 경로: {EXCEL_CANDIDATES})")
 
-    df = load_std_sheet(EXCEL_PATH)
-    price_matrix, close_labels = load_close_prices(EXCEL_PATH)
+    df = load_std_sheet(excel_path)
+    price_matrix, close_labels = load_close_prices(excel_path)
     label_positions = {lbl: idx for idx, lbl in enumerate(close_labels)}
 
     date_cols = [c for c in df.columns if c not in ("종목명", "종목코드")]
@@ -236,18 +244,18 @@ def main():
     if "종목코드" in updated.columns:
         updated["종목코드"] = updated["종목코드"].apply(normalize_code)
 
-    backup = EXCEL_PATH.with_suffix(".bak")
-    shutil.copy2(EXCEL_PATH, backup)
+    backup = excel_path.with_suffix(".bak")
+    shutil.copy2(excel_path, backup)
     try:
-        overwrite_std_sheet(EXCEL_PATH, updated)
+        overwrite_std_sheet(excel_path, updated)
     except Exception:
-        shutil.move(backup, EXCEL_PATH)
+        shutil.move(backup, excel_path)
         raise
     else:
         if backup.exists():
             backup.unlink()
 
-    print(f"✅ STD 시트 최신 {RECENT_DAYS}일 갱신 완료: {EXCEL_PATH.name}")
+    print(f"✅ STD 시트 최신 {RECENT_DAYS}일 갱신 완료: {excel_path.name}")
 
 
 if __name__ == "__main__":
