@@ -427,15 +427,11 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
                                       high_cond=lambda v: v > 100,
                                       low_cond=lambda v: v < 25)
 
-    html = styler.to_html()
-    st.markdown(
-    f"""
-    <div style="height:600px; overflow:auto;">
-        {html}
-    </div>
-    """,
-    unsafe_allow_html=True
-    )
+    st.dataframe(
+    styler,
+    use_container_width=True,
+    height=600,
+)
 
     # 🔥 과거 확장 버튼 (종합)
     if st.button("⬅ 과거 10일 더보기(종합)", disabled=(total_days <= st.session_state.show_days)):
