@@ -429,7 +429,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
 
     st.dataframe(
         styler,
-        width="stretch",
+        use_container_width=True,,
         height=600,
     )
 
@@ -604,7 +604,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
 
     st.dataframe(
         styler,
-        width="stretch",
+        use_container_width=True,,
         height=600,
         hide_index=True,
         column_config=column_config,
@@ -680,7 +680,7 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
 
     st.dataframe(
         df_display,
-        width="stretch",
+        use_container_width=True,,
         height=600,
         hide_index=True,
         column_config=column_config,
