@@ -427,10 +427,14 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
                                       high_cond=lambda v: v > 100,
                                       low_cond=lambda v: v < 25)
 
-    st.dataframe(
-        styler,
-        use_container_width=True,
-        height=600,
+    html = styler.to_html()
+    st.markdown(
+    f"""
+    <div style="height:600px; overflow:auto;">
+        {html}
+    </div>
+    """,
+    unsafe_allow_html=True
     )
 
     # 🔥 과거 확장 버튼 (종합)
