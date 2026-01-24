@@ -4,4 +4,6 @@ numpy
 openpyxl
 requests
 streamlit
+altair==4.2.2
+
 
