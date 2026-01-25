@@ -1,8 +1,9 @@
 """
 File: totalSZ.py
-Version: v3.0.0
+Version: v3.0.1
 Role: 종가/지수 히스토리를 기반으로 S/Z 및 IS/IZ 점수 시트를 증분 업데이트한다.
 # 메모: 3.0.0 - KR_Stocks_Individual 대상 지수(IS/IZ) 계산 추가
+# 메모: 3.0.1 - 모든 종목 및 지수에 Z30 계산 추가
 """
 
 # totalS, totalZ 통합모듈
@@ -272,7 +273,7 @@ def run_total_sz(filename):
         save_score_sheet(filename, dates, stocks, window, sheet, calc_s)
 
     # ---- Z 점수 ----
-    for window, sheet in [(20, "z20"), (60, "z60"), (120, "z120")]:
+    for window, sheet in [(20, "z20"), (30, "z30"), (60, "z60"), (120, "z120")]:
         save_score_sheet(filename, dates, stocks, window, sheet, calc_z)
 
     # ---- 지수 기반 IS/IZ 점수 (KR_Stocks_Individual 한정) ----
@@ -295,7 +296,7 @@ def run_total_sz(filename):
                         name_header="업종명",
                         code_header="업종코드",
                     )
-                for window, sheet in [(20, "iz20"), (60, "iz60"), (120, "iz120")]:
+                for window, sheet in [(20, "iz20"), (30, "iz30"), (60, "iz60"), (120, "iz120")]:
                     save_score_sheet(
                         filename,
                         index_dates,
@@ -313,7 +314,11 @@ def run_total_sz(filename):
 
 
 def main():
-    run_total_sz("KR_Stocks_ETF.xlsx")
+    print("이 스크립트는 run_all_scores.py에서 호출되도록 설계되었습니다.")
+    print("원한다면 run_total_sz('파일명.xlsx')을 직접 호출하세요.")
+
+    # 참고용 예시 실행 (주석 해제 시 단독 실행 가능)
+    # run_total_sz("KR_Stocks_ETF.xlsx")
 
 
 if __name__ == "__main__":
