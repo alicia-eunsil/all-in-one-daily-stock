@@ -1,8 +1,9 @@
 """
 File: extra_scores.py
-Version: v3.0.0
+Version: v3.1.0
 Role: 가격·거래량 히스토리로 GAP/QUANT/STD 시트를 증분 계산한다.
 # 메모: v3.0.0 - KR_Stocks_Individual 대상 지수(igap/istd) 계산 지원
+# 메모: v3.1.0 - GAP60/IGAP60 계산 추가
 """
 
 # gap, quant, std 전체 계산 모듈
@@ -158,13 +159,13 @@ def load_or_create_workbook(filename):
 # 2. GAP / QUANT / STD 계산식
 # =========================
 
-def calc_gap(prices_window20):
+def calc_gap(prices_window):
     """
-    GAP 점수: (오늘 종가 / 최근 20일 평균) * 100
+    GAP 점수: (오늘 종가 / 최근 N일 평균) * 100
     (_gap.py의 calc_gap과 동일)
     """
-    arr = [p for p in prices_window20 if p is not None]
-    if len(arr) < 20:
+    arr = [p for p in prices_window if p is not None]
+    if not arr:
         return None
     mean = np.mean(arr)
     if mean == 0:
@@ -343,8 +344,9 @@ def append_metric_columns(sheet, code_to_row, stock_map, existing_count, valid_d
 
 def save_gap_sheet(filename, dates, stocks, window=20, sheet_name='gap',
                    name_header="종목명", code_header="종목코드"):
+    metric_name = sheet_name.upper()
     if len(dates) < window:
-        print(f"⚠ GAP: 날짜가 {window}일보다 적습니다. ({filename})")
+        print(f"⚠ {metric_name}: 날짜가 {window}일보다 적습니다. ({filename})")
         return
 
     valid_dates = dates[window - 1:]
@@ -373,7 +375,7 @@ def save_gap_sheet(filename, dates, stocks, window=20, sheet_name='gap',
 
     if existing_count >= len(valid_dates):
         wb.save(filename)
-        print(f"✅ GAP: 신규 날짜 없음 ({filename})")
+        print(f"✅ {metric_name}: 신규 날짜 없음 ({filename})")
         return
 
     append_metric_columns(sheet, code_to_row, stock_map, existing_count, valid_dates, calc_func)
@@ -381,7 +383,7 @@ def save_gap_sheet(filename, dates, stocks, window=20, sheet_name='gap',
     sheet.column_dimensions['B'].width = 12
 
     wb.save(filename)
-    print(f"✅ GAP 업데이트 완료: {filename} (신규 {len(valid_dates) - existing_count}일)")
+    print(f"✅ {metric_name} 업데이트 완료: {filename} (신규 {len(valid_dates) - existing_count}일)")
 
 
 # =========================
@@ -483,13 +485,14 @@ def save_std_sheet(filename, dates, stocks, sheet_name='std', window_std=20, win
 def run_extra_scores(filename):
     print(f"\n=== EXTRA SCORES 계산 시작: {filename} ===")
 
-    # GAP, STD는 '종가' 시트 기반
+    # GAP(20/60), STD는 '종가' 시트 기반
     close_dates, close_stocks = get_close_data(filename)
     if close_dates and close_stocks:
         save_gap_sheet(filename, close_dates, close_stocks, window=20, sheet_name='gap')
+        save_gap_sheet(filename, close_dates, close_stocks, window=60, sheet_name='gap60')
         save_std_sheet(filename, close_dates, close_stocks, sheet_name='std', window_std=20, window_mean=20)
     else:
-        print("⚠ 종가 데이터가 없어 GAP/STD 계산을 건너뜁니다.")
+        print("⚠ 종가 데이터가 없어 GAP(20/60)/STD 계산을 건너뜁니다.")
 
     # QUANT는 '거래량' 시트 기반
     vol_dates, vol_stocks = get_volume_data(filename)
@@ -498,17 +501,26 @@ def run_extra_scores(filename):
     else:
         print("⚠ 거래량 데이터가 없어 QUANT 계산을 건너뜁니다.")
 
-    # 지수 기반 GAP/STD (KR_Stocks_Individual에만 적용)
+    # 지수 기반 GAP(20/60)/STD (KR_Stocks_Individual에만 적용)
     if Path(filename).stem == INDEX_TARGET_STEM:
         idx_dates, idx_stocks = get_index_data(filename)
         if idx_dates and idx_stocks:
-            print("➡ 지수 기반 igap/istd 계산 시작")
+            print("➡ 지수 기반 igap/igap60/istd 계산 시작")
             save_gap_sheet(
                 filename,
                 idx_dates,
                 idx_stocks,
                 window=20,
                 sheet_name='igap',
+                name_header="업종명",
+                code_header="업종코드",
+            )
+            save_gap_sheet(
+                filename,
+                idx_dates,
+                idx_stocks,
+                window=60,
+                sheet_name='igap60',
                 name_header="업종명",
                 code_header="업종코드",
             )
@@ -523,7 +535,7 @@ def run_extra_scores(filename):
                 code_header="업종코드",
             )
         else:
-            print("⚠ 지수 데이터가 없어 igap/istd 계산을 건너뜁니다.")
+            print("⚠ 지수 데이터가 없어 igap/igap60/istd 계산을 건너뜁니다.")
 
     print(f"=== EXTRA SCORES 계산 완료: {filename} ===\n")
 

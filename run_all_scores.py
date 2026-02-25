@@ -1,3 +1,10 @@
+"""
+File: run_all_scores.py
+Version: v1.1.0
+Role: JSON 매핑의 각 엑셀 파일에 대해 S/Z 및 추가 지표 계산을 일괄 실행한다.
+# 메모: v1.1.0 - extra scores 실행 대상에 GAP60 추가
+"""
+
 import json
 import os
 
@@ -34,7 +41,7 @@ def run_all_scores_for_file(category_name, filename):
     """
     하나의 엑셀 파일에 대해:
       - S/Z 점수 (s20/s60/s120, z20/z60/z120)
-      - extra scores (gap, quant, std)
+      - extra scores (gap, gap60, quant, std)
     를 모두 실행한다.
     """
     if not os.path.exists(filename):
@@ -49,7 +56,7 @@ def run_all_scores_for_file(category_name, filename):
     except Exception as e:
         print(f"⚠ [{category_name}] S/Z 계산 중 오류: {e}")
 
-    # 2) GAP / QUANT / STD 계산
+    # 2) GAP / GAP60 / QUANT / STD 계산
     try:
         run_extra_scores(filename)
     except Exception as e:
