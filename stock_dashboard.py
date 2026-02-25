@@ -4,6 +4,7 @@ Version: v4.0.2
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
 # 메모: v4.0.1 - GAP/STD 상하위 강조 시 평균·지수 행 제외 + 동률 포함, 불필요 포맷 함수 제거
 # 메모: v4.0.2 - Z30 출력 추가
+# 메모: v4.0.3 - 대시보드 표시에서 Z30 숨김(데이터 로딩은 유지)
 """
 
 import streamlit as st
@@ -326,7 +327,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # --------------------------------------
     # 🔥 멀티헤더 생성 (1행: 날짜, 2행: 지표명)
     # --------------------------------------
-    metrics = ["Z20", "Z30", "Z60", "Z120", "S20", "S60", "S120", "GAP", "QUANT", "STD"]
+    metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP", "QUANT", "STD"]
     base_cols = ["종목코드", "종목명"]
     df_show = df_f[base_cols].copy()
 
@@ -397,12 +398,12 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # Z/S/Q/GAP 포맷 이모지 적용
     # --------------------------------------
     for lbl in selected_labels:
-        for m in ["Z20", "Z30", "Z60", "Z120", "S20", "S60", "S120", "GAP", "STD", "QUANT"]:
+        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP", "STD", "QUANT"]:
             col = (lbl, m)
             if col in df_show.columns:
                 df_show[col] = pd.to_numeric(df_show[col], errors="coerce")
 
-    z_columns_total = [(lbl, m) for lbl in selected_labels for m in ["Z20", "Z30", "Z60", "Z120"] if (lbl, m) in df_show.columns]
+    z_columns_total = [(lbl, m) for lbl in selected_labels for m in ["Z20", "Z60", "Z120"] if (lbl, m) in df_show.columns]
     s_columns_total = [(lbl, m) for lbl in selected_labels for m in ["S20", "S60", "S120"] if (lbl, m) in df_show.columns]
     gap_columns_total = [(lbl, "GAP") for lbl in selected_labels if (lbl, "GAP") in df_show.columns]
     std_columns_total = [(lbl, "STD") for lbl in selected_labels if (lbl, "STD") in df_show.columns]
@@ -495,7 +496,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
         st.warning("⚠️ 지표별 데이터를 불러올 수 없습니다.")
         return
 
-    metric_options = ["Z20", "Z30", "Z60", "Z120",
+    metric_options = ["Z20", "Z60", "Z120",
                       "S20", "S60", "S120",
                       "GAP", "QUANT", "STD"]
 
