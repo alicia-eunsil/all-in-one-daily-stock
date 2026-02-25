@@ -175,6 +175,47 @@ def _highlight_top_bottom_cells(df_or_styler, columns, top_n=10, high_color="#ff
     return styler
 
 
+def _highlight_row_min_max_cells(df_or_styler, columns, lookback_n=20, high_color="#ffe0e0", low_color="#e0ecff", allowed_mask=None):
+    """
+    각 행(종목)에서 최근 lookback_n개 컬럼 값 중 최댓값/최솟값 셀을 강조.
+    동률은 모두 포함한다.
+    """
+    if not columns:
+        return df_or_styler
+
+    use_cols = list(columns[-lookback_n:])
+    if not use_cols:
+        return df_or_styler
+
+    styler = df_or_styler if hasattr(df_or_styler, "apply") else df_or_styler.style
+
+    def _style_row(row):
+        styles = [""] * len(row)
+
+        if allowed_mask is not None:
+            allowed = bool(allowed_mask.reindex([row.name], fill_value=False).iloc[0])
+            if not allowed:
+                return styles
+
+        series = pd.to_numeric(row, errors="coerce")
+        valid = series.dropna()
+        if valid.empty:
+            return styles
+
+        max_val = valid.max()
+        min_val = valid.min()
+        for i, num in enumerate(series):
+            if pd.isna(num):
+                continue
+            if num == max_val:
+                styles[i] = f"background-color: {high_color}; color: red"
+            elif num == min_val:
+                styles[i] = f"background-color: {low_color}; color: blue"
+        return styles
+
+    return styler.apply(_style_row, axis=1, subset=use_cols)
+
+
 def _highlight_threshold(df_or_styler, columns, high_cond, low_cond, high_color="#ffe0e0", low_color="#e0ecff"):
     """
     조건부(상/하)로 색을 입힌 Styler 반환.
@@ -413,9 +454,9 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
 
     # 강조 색상 적용
     if gap_columns_total:
-        styler = _highlight_top_bottom_cells(styler, gap_columns_total, top_n=10, allowed_mask=allowed_mask_total)
+        styler = _highlight_row_min_max_cells(styler, gap_columns_total, lookback_n=20, allowed_mask=allowed_mask_total)
     if std_columns_total:
-        styler = _highlight_top_bottom_cells(styler, std_columns_total, top_n=10, allowed_mask=allowed_mask_total)
+        styler = _highlight_row_min_max_cells(styler, std_columns_total, lookback_n=20, allowed_mask=allowed_mask_total)
     if z_columns_total:
         styler = _highlight_threshold(styler, z_columns_total,
                                       high_cond=lambda v: v > 100,
@@ -591,9 +632,9 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     # 스타일 (색상 강조)
     styler = df_filtered.style.format({lbl: ("{:.2f}" if metric == "STD" else "{:.0f}") for lbl in selected_labels}, na_rep="-")
     if metric == "GAP":
-        styler = _highlight_top_bottom_cells(styler, gap_columns_metric, top_n=10, allowed_mask=allowed_mask)
+        styler = _highlight_row_min_max_cells(styler, gap_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
     elif metric == "STD":
-        styler = _highlight_top_bottom_cells(styler, std_columns_metric, top_n=10, allowed_mask=allowed_mask)
+        styler = _highlight_row_min_max_cells(styler, std_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
     elif metric.startswith("Z"):
         styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
                                       high_cond=lambda v: v > 100, low_cond=lambda v: v < -100)
