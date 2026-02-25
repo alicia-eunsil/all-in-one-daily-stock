@@ -1,11 +1,12 @@
 """
 File: stock_dashboard.py
-Version: v4.1.0
+Version: v4.1.1
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
 # 메모: v4.0.1 - GAP/STD 상하위 강조 시 평균·지수 행 제외 + 동률 포함, 불필요 포맷 함수 제거
 # 메모: v4.0.2 - Z30 출력 추가
 # 메모: v4.0.3 - 대시보드 표시에서 Z30 숨김(데이터 로딩은 유지)
 # 메모: v4.1.0 - GAP 시트는 GAP20으로 표시하고 GAP60(=gap60) 지표를 추가
+# 메모: v4.1.1 - 데이터프레임 높이를 브라우저 높이(100vh) 기반으로 동적 조정
 """
 
 import streamlit as st
@@ -135,6 +136,36 @@ def format_excel_date(v):
     if not s.endswith("."):
         s += "."
     return s
+
+
+def _inject_responsive_dataframe_height_css():
+    """
+    브라우저 높이 기준으로 데이터프레임 높이를 동적으로 조정한다.
+    - 상단 타이틀/필터 영역을 고려해 오프셋(330px)을 뺀다.
+    - 너무 작거나 큰 화면에서 과도해지지 않게 min/max를 둔다.
+    """
+    st.markdown(
+        """
+        <style>
+        :root {
+            --dynamic-table-height: min(1400px, max(520px, calc(100vh - 330px)));
+        }
+        div[data-testid="stDataFrame"] {
+            height: var(--dynamic-table-height) !important;
+        }
+        div[data-testid="stDataFrame"] > div {
+            height: 100% !important;
+        }
+        div[data-testid="stDataFrame"] [data-testid="stVirtualizedDataFrame"] {
+            height: 100% !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_inject_responsive_dataframe_height_css()
 
 
 def _highlight_top_bottom_cells(df_or_styler, columns, top_n=10, high_color="#ffe0e0", low_color="#e0ecff", allowed_mask=None):
@@ -479,7 +510,6 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     st.dataframe(
     styler,
     use_container_width=True,
-    height=600,
 )
 
     # 🔥 과거 확장 버튼 (종합)
@@ -654,7 +684,6 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     st.dataframe(
         styler,
         use_container_width=True,
-        height=600,
         hide_index=True,
         column_config=column_config,
     )
@@ -730,7 +759,6 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
     st.dataframe(
         df_display,
         use_container_width=True,
-        height=600,
         hide_index=True,
         column_config=column_config,
     )
