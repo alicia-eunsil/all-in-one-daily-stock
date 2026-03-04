@@ -965,8 +965,10 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
             netbuy_start_date = netbuy_start_dt.strftime("%Y%m%d")
             print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_start_date} ~ {today_str}")
         else:
-            netbuy_start_date = start_date
-            print(f"📅 [{excel_filename}] 순매수 전체 조회(기준): {netbuy_start_date} ~ {today_str}")
+            # 순매수 시트가 처음 생성되는 경우에는 시세 증분 시작일(start_date)을 재사용하지 않고
+            # 최근 100일 기준으로 최초 데이터를 채운다.
+            netbuy_start_date = (today - timedelta(days=100)).strftime("%Y%m%d")
+            print(f"📅 [{excel_filename}] 순매수 전체 조회(최초): {netbuy_start_date} ~ {today_str}")
 
     data_list = []
     netbuy_data_list = []
