@@ -1,10 +1,11 @@
 """
 File: stock_history.py
-Version: v2.3.0
+Version: v2.4.0
 Role: 한국투자증권 API를 호출해 주식·ETF 히스토리를 가져오고 엑셀의 시세/지수 시트를 갱신한다.
 # 메모: v2.1.0 - KR_Stocks_Individual에 개인/외국인/기관계 순매수(일별) 시트 업데이트 추가
 # 메모: v2.2.0 - 순매수는 날짜별 단건 조회로 저장 + 최초 1회 전체 동기화 후 증분 업데이트
 # 메모: v2.3.0 - 순매수 다중일 조회를 30일 묶음 호출로 최적화(실행 지연 개선)
+# 메모: v2.4.0 - 순매수 시트 1회 전체 삭제 후 동일 날짜 범위 재저장(재빌드) 지원
 """
 
 import json
@@ -22,9 +23,10 @@ NETBUY_SHEET_BY_KEY = {
     "institution": "순매수_기관계",
 }
 NETBUY_META_SHEET_NAME = "__meta_netbuy"
-NETBUY_SYNC_VERSION = "v2_daily_by_date"
+NETBUY_SYNC_VERSION = "v2_daily_by_date_rebuilt"
 NETBUY_INITIAL_LOOKBACK_DAYS = 100
 NETBUY_FORCE_RESYNC_EXISTING_DATES = False
+NETBUY_RESET_EXISTING_ONCE = True
 REQUEST_SLEEP_SEC = 0.1
 NETBUY_MAX_WORKERS = 8
 
@@ -713,6 +715,27 @@ def set_netbuy_sync_version(filename, version):
         print(f"❌ 순매수 메타 저장 에러({filename}): {e}")
 
 
+def reset_netbuy_sheets(filename):
+    """
+    순매수 3개 시트와 메타 시트를 삭제한다.
+    이후 save_netbuy_to_excel 호출 시 시트가 다시 생성된다.
+    """
+    try:
+        wb = openpyxl.load_workbook(filename)
+        removed = False
+        for sheet_name in list(NETBUY_SHEET_BY_KEY.values()) + [NETBUY_META_SHEET_NAME]:
+            if sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                wb.remove(ws)
+                removed = True
+        if removed:
+            wb.save(filename)
+            print(f"🧹 [{filename}] 기존 순매수 시트/메타 삭제 완료", flush=True)
+        wb.close()
+    except Exception as e:
+        print(f"❌ 순매수 시트 초기화 에러({filename}): {e}")
+
+
 # =========================
 # 3. 지수(코스피/코스닥) 시트
 # =========================
@@ -1064,42 +1087,49 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
     should_set_netbuy_sync_version = False
     if update_netbuy:
         close_dates = get_all_dates_from_sheet(excel_filename, "종가")
-        latest_netbuy = []
-        for netbuy_sheet_name in NETBUY_SHEET_BY_KEY.values():
-            d = get_latest_date_from_sheet(excel_filename, netbuy_sheet_name)
-            if d:
-                latest_netbuy.append(d)
-
         sync_version = get_netbuy_sync_version(excel_filename)
         existing_netbuy_dates = set()
         for netbuy_sheet_name in NETBUY_SHEET_BY_KEY.values():
             existing_netbuy_dates.update(get_all_dates_from_sheet(excel_filename, netbuy_sheet_name))
 
-        if NETBUY_FORCE_RESYNC_EXISTING_DATES:
+        if NETBUY_RESET_EXISTING_ONCE and existing_netbuy_dates and sync_version != NETBUY_SYNC_VERSION:
+            # 1회 재빌드: 기존 순매수 시트를 지우고, 기존에 있던 날짜 범위를 동일하게 다시 채운다.
             netbuy_target_dates = sorted(existing_netbuy_dates)
+            reset_netbuy_sheets(excel_filename)
             should_set_netbuy_sync_version = True
-            if netbuy_target_dates:
-                print(f"📅 [{excel_filename}] 순매수 강제 재동기화: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
-            else:
-                print(f"📅 [{excel_filename}] 순매수 강제 재동기화: 대상 날짜 없음", flush=True)
-        elif not existing_netbuy_dates:
-            # 순매수 시트가 없는 첫 생성 케이스만 초기 구간을 채운다.
-            fallback_start = (today - timedelta(days=NETBUY_INITIAL_LOOKBACK_DAYS)).strftime("%Y%m%d")
-            netbuy_target_dates = [d for d in close_dates if d >= fallback_start]
-            should_set_netbuy_sync_version = True
-            if netbuy_target_dates:
-                print(f"📅 [{excel_filename}] 순매수 초기 생성: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
-            else:
-                print(f"📅 [{excel_filename}] 순매수 초기 생성: 대상 날짜 없음", flush=True)
+            print(f"📅 [{excel_filename}] 순매수 전체 재빌드: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
         else:
-            # 기존 시트가 있으면 버전과 무관하게 최신일 이후 증분만 수행
-            latest_netbuy_str = max(latest_netbuy) if latest_netbuy else max(existing_netbuy_dates)
-            netbuy_target_dates = [d for d in close_dates if d > latest_netbuy_str]
-            should_set_netbuy_sync_version = (sync_version != NETBUY_SYNC_VERSION)
-            if netbuy_target_dates:
-                print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
+            latest_netbuy = []
+            for netbuy_sheet_name in NETBUY_SHEET_BY_KEY.values():
+                d = get_latest_date_from_sheet(excel_filename, netbuy_sheet_name)
+                if d:
+                    latest_netbuy.append(d)
+
+            if NETBUY_FORCE_RESYNC_EXISTING_DATES:
+                netbuy_target_dates = sorted(existing_netbuy_dates)
+                should_set_netbuy_sync_version = True
+                if netbuy_target_dates:
+                    print(f"📅 [{excel_filename}] 순매수 강제 재동기화: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
+                else:
+                    print(f"📅 [{excel_filename}] 순매수 강제 재동기화: 대상 날짜 없음", flush=True)
+            elif not existing_netbuy_dates:
+                # 순매수 시트가 없는 첫 생성 케이스만 초기 구간을 채운다.
+                fallback_start = (today - timedelta(days=NETBUY_INITIAL_LOOKBACK_DAYS)).strftime("%Y%m%d")
+                netbuy_target_dates = [d for d in close_dates if d >= fallback_start]
+                should_set_netbuy_sync_version = True
+                if netbuy_target_dates:
+                    print(f"📅 [{excel_filename}] 순매수 초기 생성: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
+                else:
+                    print(f"📅 [{excel_filename}] 순매수 초기 생성: 대상 날짜 없음", flush=True)
             else:
-                print(f"📅 [{excel_filename}] 순매수는 이미 최신입니다.", flush=True)
+                # 기존 시트가 있으면 버전과 무관하게 최신일 이후 증분만 수행
+                latest_netbuy_str = max(latest_netbuy) if latest_netbuy else max(existing_netbuy_dates)
+                netbuy_target_dates = [d for d in close_dates if d > latest_netbuy_str]
+                should_set_netbuy_sync_version = (sync_version != NETBUY_SYNC_VERSION)
+                if netbuy_target_dates:
+                    print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
+                else:
+                    print(f"📅 [{excel_filename}] 순매수는 이미 최신입니다.", flush=True)
 
     enable_netbuy_fetch = bool(update_netbuy and netbuy_target_dates)
 
