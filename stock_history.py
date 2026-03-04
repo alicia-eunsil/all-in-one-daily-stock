@@ -23,6 +23,8 @@ NETBUY_SHEET_BY_KEY = {
 NETBUY_META_SHEET_NAME = "__meta_netbuy"
 NETBUY_SYNC_VERSION = "v2_daily_by_date"
 NETBUY_INITIAL_LOOKBACK_DAYS = 100
+NETBUY_FORCE_RESYNC_EXISTING_DATES = True
+REQUEST_SLEEP_SEC = 0.3
 
 
 # =========================
@@ -375,9 +377,7 @@ def load_stock_list(filename, market="KR"):
                     'code': code
                 })
 
-        print(f"\n[{filename}]에서 읽어온 종목 목록 ({market}):")
-        for stock in stocks:
-            print(f"  • {stock['name']} (코드: {stock['code']})")
+        print(f"\n[{filename}]에서 읽어온 종목 수 ({market}): {len(stocks)}개", flush=True)
 
         return stocks
 
@@ -1049,11 +1049,11 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
         latest_str = max(latest_close, latest_amount)
         start_dt = datetime.strptime(latest_str, '%Y%m%d') + timedelta(days=1)
         start_date = start_dt.strftime('%Y%m%d')
-        print(f"\n📅 [{excel_filename}] 추가 조회: {start_date} ~ {today_str}")
+        print(f"\n📅 [{excel_filename}] 추가 조회: {start_date} ~ {today_str}", flush=True)
     else:
         end_dt = today
         start_date = (end_dt - timedelta(days=100)).strftime('%Y%m%d')
-        print(f"\n📅 [{excel_filename}] 전체 조회(최근 100일): {start_date} ~ {today_str}")
+        print(f"\n📅 [{excel_filename}] 전체 조회(최근 100일): {start_date} ~ {today_str}", flush=True)
 
     end_date = today_str
 
@@ -1068,7 +1068,7 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
                 latest_netbuy.append(d)
 
         sync_version = get_netbuy_sync_version(excel_filename)
-        if sync_version != NETBUY_SYNC_VERSION:
+        if NETBUY_FORCE_RESYNC_EXISTING_DATES or sync_version != NETBUY_SYNC_VERSION:
             # 기존 시트가 있으면 그 기간 전체를 재동기화(잘못 저장된 과거값 정정)
             existing_netbuy_dates = set()
             for netbuy_sheet_name in NETBUY_SHEET_BY_KEY.values():
@@ -1083,31 +1083,34 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
 
             should_set_netbuy_sync_version = True
             if netbuy_target_dates:
-                print(f"📅 [{excel_filename}] 순매수 초기 동기화(전체 정정): {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)")
+                if NETBUY_FORCE_RESYNC_EXISTING_DATES:
+                    print(f"📅 [{excel_filename}] 순매수 강제 재동기화: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
+                else:
+                    print(f"📅 [{excel_filename}] 순매수 초기 동기화(전체 정정): {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
             else:
-                print(f"📅 [{excel_filename}] 순매수 초기 동기화: 대상 날짜 없음")
+                print(f"📅 [{excel_filename}] 순매수 초기 동기화: 대상 날짜 없음", flush=True)
         else:
             if latest_netbuy:
                 latest_netbuy_str = max(latest_netbuy)
                 netbuy_target_dates = [d for d in close_dates if d > latest_netbuy_str]
                 if netbuy_target_dates:
-                    print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)")
+                    print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
                 else:
-                    print(f"📅 [{excel_filename}] 순매수는 이미 최신입니다.")
+                    print(f"📅 [{excel_filename}] 순매수는 이미 최신입니다.", flush=True)
             else:
                 # 메타는 있는데 시트가 없는 비정상 케이스 방어: 최근 100일 기준 재생성
                 netbuy_start_fallback = (today - timedelta(days=100)).strftime("%Y%m%d")
                 netbuy_target_dates = [d for d in close_dates if d >= netbuy_start_fallback]
                 if netbuy_target_dates:
-                    print(f"📅 [{excel_filename}] 순매수 재생성: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)")
+                    print(f"📅 [{excel_filename}] 순매수 재생성: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)", flush=True)
                 else:
-                    print(f"📅 [{excel_filename}] 순매수 재생성 대상 날짜 없음")
+                    print(f"📅 [{excel_filename}] 순매수 재생성 대상 날짜 없음", flush=True)
 
     data_list = []
     netbuy_data_list = []
-    print(f"\n총 {len(stocks)}개 종목에 대해 조회합니다... ({excel_filename})")
+    print(f"\n총 {len(stocks)}개 종목에 대해 조회합니다... ({excel_filename})", flush=True)
     for i, stock in enumerate(stocks, start=1):
-        print(f"  [{i}/{len(stocks)}] {stock['name']}({stock['code']}) ...", end='')
+        print(f"  [{i}/{len(stocks)}] {stock['name']}({stock['code']}) ...", end='', flush=True)
 
         history = fetch_func(
             access_token, domain,
@@ -1116,14 +1119,14 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
         )
 
         if history:
-            print(f"성공 ({len(history)}일)")
+            print(f"성공 ({len(history)}일)", flush=True)
             data_list.append({
                 "name": stock['name'],
                 "code": stock['code'],
                 "history": history,
             })
         else:
-            print("실패 또는 추가 데이터 없음")
+            print("실패 또는 추가 데이터 없음", flush=True)
 
         if update_netbuy and netbuy_target_dates:
             netbuy_history = fetch_investor_netbuy_for_dates(
@@ -1142,7 +1145,10 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
                     "netbuy_history": netbuy_history,
                 })
 
-        time.sleep(1)
+        if i % 20 == 0:
+            print(f"    ↳ 진행률: {i}/{len(stocks)} 종목 완료", flush=True)
+
+        time.sleep(REQUEST_SLEEP_SEC)
 
     if data_list:
         save_history_to_excel(data_list, filename=excel_filename, market=market)
@@ -1155,18 +1161,18 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
                 filename=excel_filename
             )
     else:
-        print(f"\n❌ [{excel_filename}] 저장할 데이터가 없습니다.")
+        print(f"\n❌ [{excel_filename}] 저장할 데이터가 없습니다.", flush=True)
 
     if update_netbuy:
         if netbuy_data_list:
             save_netbuy_to_excel(netbuy_data_list, filename=excel_filename, market=market)
             if should_set_netbuy_sync_version:
                 set_netbuy_sync_version(excel_filename, NETBUY_SYNC_VERSION)
-                print(f"✅ [{excel_filename}] 순매수 동기화 버전 저장: {NETBUY_SYNC_VERSION}")
+                print(f"✅ [{excel_filename}] 순매수 동기화 버전 저장: {NETBUY_SYNC_VERSION}", flush=True)
         elif not netbuy_target_dates:
-            print(f"  • [{excel_filename}] 순매수는 이미 최신입니다.")
+            print(f"  • [{excel_filename}] 순매수는 이미 최신입니다.", flush=True)
         else:
-            print(f"  • [{excel_filename}] 순매수 신규 데이터가 없습니다. (대상일 {len(netbuy_target_dates)}일)")
+            print(f"  • [{excel_filename}] 순매수 신규 데이터가 없습니다. (대상일 {len(netbuy_target_dates)}일)", flush=True)
 
 
 # =========================
