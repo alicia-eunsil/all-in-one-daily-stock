@@ -1,9 +1,10 @@
 """
 File: stock_history.py
-Version: v2.2.0
+Version: v2.3.0
 Role: 한국투자증권 API를 호출해 주식·ETF 히스토리를 가져오고 엑셀의 시세/지수 시트를 갱신한다.
 # 메모: v2.1.0 - KR_Stocks_Individual에 개인/외국인/기관계 순매수(일별) 시트 업데이트 추가
 # 메모: v2.2.0 - 순매수는 날짜별 단건 조회로 저장 + 최초 1회 전체 동기화 후 증분 업데이트
+# 메모: v2.3.0 - 순매수 다중일 조회를 30일 묶음 호출로 최적화(실행 지연 개선)
 """
 
 import json
@@ -236,8 +237,8 @@ def fetch_overseas_daily_history(access_token, domain, market_code, symbol,
         return None
 
 
-def fetch_investor_netbuy_by_date(access_token, domain, symbol, query_date,
-                                  app_key=None, app_secret=None):
+def fetch_investor_netbuy_rows(access_token, domain, symbol, query_date,
+                               app_key=None, app_secret=None):
     """
     국내 종목별 투자자매매동향(일별) 조회
     /uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily
@@ -274,24 +275,73 @@ def fetch_investor_netbuy_by_date(access_token, domain, symbol, query_date,
         if not rows:
             return None
 
-        target_row = None
+        result = []
         for row in rows:
-            if row.get("stck_bsop_date") == query_date:
-                target_row = row
-                break
-
-        if not target_row:
-            return None
-
-        return {
-            "date": query_date,
-            "personal": _to_int_safe(target_row.get("prsn_ntby_qty")),
-            "foreign": _to_int_safe(target_row.get("frgn_ntby_qty")),
-            "institution": _to_int_safe(target_row.get("orgn_ntby_qty")),
-        }
+            d = row.get("stck_bsop_date")
+            if not d:
+                continue
+            result.append({
+                "date": d,
+                "personal": _to_int_safe(row.get("prsn_ntby_qty")),
+                "foreign": _to_int_safe(row.get("frgn_ntby_qty")),
+                "institution": _to_int_safe(row.get("orgn_ntby_qty")),
+            })
+        return result or None
     except Exception as e:
         print(f"❌ 순매수 조회 중 에러 ({symbol}, {query_date}): {str(e)}")
         return None
+
+
+def fetch_investor_netbuy_for_dates(access_token, domain, symbol, target_dates,
+                                    app_key=None, app_secret=None):
+    """
+    target_dates(YYYYMMDD 목록)에 대해 순매수 일별값을 조회.
+    API 1회 호출당 약 30영업일이 내려오므로 날짜 구간을 묶어서 최소 호출로 수집한다.
+    """
+    if not target_dates:
+        return []
+
+    remaining = sorted(set(target_dates))
+    remaining_set = set(remaining)
+    found = {}
+    guard = 0
+
+    while remaining and guard < 50:
+        guard += 1
+        query_date = remaining[-1]  # 현재 남은 날짜 중 최신일 기준 조회
+        rows = fetch_investor_netbuy_rows(
+            access_token=access_token,
+            domain=domain,
+            symbol=symbol,
+            query_date=query_date,
+            app_key=app_key,
+            app_secret=app_secret,
+        )
+        if not rows:
+            break
+
+        row_dates = []
+        for row in rows:
+            d = row["date"]
+            row_dates.append(d)
+            if d in remaining_set and d not in found:
+                found[d] = row
+
+        if not row_dates:
+            break
+
+        remaining = [d for d in remaining if d not in found]
+        if not remaining:
+            break
+
+        # 이번 호출의 최저 날짜보다 더 과거 구간만 다음 루프 대상으로 남김
+        oldest = min(row_dates)
+        older_remaining = [d for d in remaining if d < oldest]
+        if not older_remaining:
+            break
+        remaining = older_remaining
+
+    return [found[d] for d in sorted(found.keys())]
 
 
 # =========================
@@ -1076,18 +1126,14 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
             print("실패 또는 추가 데이터 없음")
 
         if update_netbuy and netbuy_target_dates:
-            netbuy_history = []
-            for query_date in netbuy_target_dates:
-                day_row = fetch_investor_netbuy_by_date(
-                    access_token=access_token,
-                    domain=domain,
-                    symbol=stock["code"],
-                    query_date=query_date,
-                    app_key=app_key,
-                    app_secret=app_secret,
-                )
-                if day_row:
-                    netbuy_history.append(day_row)
+            netbuy_history = fetch_investor_netbuy_for_dates(
+                access_token=access_token,
+                domain=domain,
+                symbol=stock["code"],
+                target_dates=netbuy_target_dates,
+                app_key=app_key,
+                app_secret=app_secret,
+            )
 
             if netbuy_history:
                 netbuy_data_list.append({
