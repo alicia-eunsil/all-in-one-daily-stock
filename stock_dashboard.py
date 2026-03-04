@@ -780,18 +780,18 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
 def render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days):
     """
     4️⃣ 매수량 탭
-    - 투자자 유형(개인/외국인/기관계) 선택
-    - 종목코드/종목명 + 날짜별 순매수 수량
+    - 종목코드/종목명 + (날짜 × 투자자유형) 순매수 수량
     """
     if not netbuy_df_map:
         st.warning("⚠️ 매수량 데이터를 불러올 수 없습니다.")
         return
 
-    investor = st.selectbox("투자자 유형", list(netbuy_df_map.keys()), key="investor_type")
-    df_buy = netbuy_df_map.get(investor)
-    if df_buy is None or df_buy.empty:
-        st.warning("⚠️ 선택한 투자자 유형 데이터가 없습니다.")
+    investor_order = [name for name in ["개인", "외국인", "기관계"] if name in netbuy_df_map]
+    if not investor_order:
+        st.warning("⚠️ 매수량 데이터의 투자자 유형을 찾을 수 없습니다.")
         return
+
+    base_df = netbuy_df_map[investor_order[0]].copy()
 
     st.markdown("### 🔍 필터 옵션 (매수량)")
     b1, b2 = st.columns(2)
@@ -801,35 +801,42 @@ def render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days):
         sort_buy = st.selectbox("정렬 기준", ["종목코드", "종목명"], key="sort_buy")
 
     if search_buy:
-        df_buy = df_buy[
-            df_buy["종목코드"].astype(str).str.contains(search_buy, case=False) |
-            df_buy["종목명"].astype(str).str.contains(search_buy, case=False)
+        base_df = base_df[
+            base_df["종목코드"].astype(str).str.contains(search_buy, case=False) |
+            base_df["종목명"].astype(str).str.contains(search_buy, case=False)
         ]
 
-    df_buy = df_buy.sort_values(by=sort_buy)
+    base_df = base_df.sort_values(by=sort_buy)
     st.info(netbuy_range_msg)
 
-    date_cols = [c for c in df_buy.columns if c not in ["종목코드", "종목명"]]
-    df_buy = df_buy[["종목코드", "종목명"] + date_cols]
+    date_cols = [c for c in base_df.columns if c not in ["종목코드", "종목명"]]
+    if not date_cols:
+        st.warning("⚠️ 매수량 날짜 컬럼이 없습니다.")
+        return
 
-    fmt_map = {c: "{:.0f}" for c in date_cols}
-    styler = df_buy.style.format(fmt_map, na_rep="-")
-    if date_cols:
-        styler = _highlight_threshold(
-            styler,
-            date_cols,
-            high_cond=lambda v: v > 0,
-            low_cond=lambda v: v < 0,
-        )
+    row_keys = pd.MultiIndex.from_frame(base_df[["종목코드", "종목명"]])
+    part_frames = []
+    for investor in investor_order:
+        df_inv = netbuy_df_map[investor].copy()
+        df_inv = df_inv.set_index(["종목코드", "종목명"])
+        df_inv = df_inv.reindex(row_keys)
+        df_inv = df_inv.reindex(columns=date_cols)
+        df_inv.columns = pd.MultiIndex.from_tuples([(d, investor) for d in date_cols])
+        part_frames.append(df_inv)
+
+    df_show = pd.concat(part_frames, axis=1)
+
+    ordered_cols = []
+    for d in date_cols:
+        for investor in investor_order:
+            col = (d, investor)
+            if col in df_show.columns:
+                ordered_cols.append(col)
+    df_show = df_show.reindex(columns=ordered_cols)
 
     st.dataframe(
-        styler,
+        df_show.style.format("{:.0f}", na_rep="-"),
         use_container_width=True,
-        hide_index=True,
-        column_config={
-            "종목코드": st.column_config.TextColumn("종목코드", width="small", pinned="left"),
-            "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
-        },
     )
 
     if st.button("⬅ 과거 10일 더보기(매수량)", disabled=(total_netbuy_days <= st.session_state.show_days_buy)):
