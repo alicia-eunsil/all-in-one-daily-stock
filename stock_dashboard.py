@@ -1,12 +1,13 @@
 """
 File: stock_dashboard.py
-Version: v4.1.1
+Version: v4.2.0
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
 # 메모: v4.0.1 - GAP/STD 상하위 강조 시 평균·지수 행 제외 + 동률 포함, 불필요 포맷 함수 제거
 # 메모: v4.0.2 - Z30 출력 추가
 # 메모: v4.0.3 - 대시보드 표시에서 Z30 숨김(데이터 로딩은 유지)
 # 메모: v4.1.0 - GAP 시트는 GAP20으로 표시하고 GAP60(=gap60) 지표를 추가
 # 메모: v4.1.1 - 데이터프레임 높이를 브라우저 높이(100vh) 기반으로 동적 조정
+# 메모: v4.2.0 - KR_Stocks_Individual에 개인/외국인/기관계 순매수(일별) '매수량' 탭 추가
 """
 
 import streamlit as st
@@ -65,12 +66,19 @@ if "show_days" not in st.session_state:
 # 🔥 원자료 탭 날짜 확장용
 if "show_days_raw" not in st.session_state:
     st.session_state.show_days_raw = 10  # 시작: 최근 10일
+if "show_days_buy" not in st.session_state:
+    st.session_state.show_days_buy = 10  # 시작: 최근 10일
 
 # 🔥 파일 선택 상태
 BASE_DIR = Path(__file__).resolve().parent
 JSON_PATH = BASE_DIR / "stock_file_map.json"
 EXCEL_MAP = {}
 INDEX_SHEET_NAME = "지수"
+NETBUY_SHEET_MAP = {
+    "개인": "순매수_개인",
+    "외국인": "순매수_외국인",
+    "기관계": "순매수_기관계",
+}
 if "selected_category" not in st.session_state:
     # JSON 로드해서 첫 번째 항목을 기본 선택값으로
     try:
@@ -769,6 +777,66 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
         st.rerun()
 
 
+def render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days):
+    """
+    4️⃣ 매수량 탭
+    - 투자자 유형(개인/외국인/기관계) 선택
+    - 종목코드/종목명 + 날짜별 순매수 수량
+    """
+    if not netbuy_df_map:
+        st.warning("⚠️ 매수량 데이터를 불러올 수 없습니다.")
+        return
+
+    investor = st.selectbox("투자자 유형", list(netbuy_df_map.keys()), key="investor_type")
+    df_buy = netbuy_df_map.get(investor)
+    if df_buy is None or df_buy.empty:
+        st.warning("⚠️ 선택한 투자자 유형 데이터가 없습니다.")
+        return
+
+    st.markdown("### 🔍 필터 옵션 (매수량)")
+    b1, b2 = st.columns(2)
+    with b1:
+        search_buy = st.text_input("🔎 종목명/종목코드 검색", key="search_buy")
+    with b2:
+        sort_buy = st.selectbox("정렬 기준", ["종목코드", "종목명"], key="sort_buy")
+
+    if search_buy:
+        df_buy = df_buy[
+            df_buy["종목코드"].astype(str).str.contains(search_buy, case=False) |
+            df_buy["종목명"].astype(str).str.contains(search_buy, case=False)
+        ]
+
+    df_buy = df_buy.sort_values(by=sort_buy)
+    st.info(netbuy_range_msg)
+
+    date_cols = [c for c in df_buy.columns if c not in ["종목코드", "종목명"]]
+    df_buy = df_buy[["종목코드", "종목명"] + date_cols]
+
+    fmt_map = {c: "{:.0f}" for c in date_cols}
+    styler = df_buy.style.format(fmt_map, na_rep="-")
+    if date_cols:
+        styler = _highlight_threshold(
+            styler,
+            date_cols,
+            high_cond=lambda v: v > 0,
+            low_cond=lambda v: v < 0,
+        )
+
+    st.dataframe(
+        styler,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "종목코드": st.column_config.TextColumn("종목코드", width="small", pinned="left"),
+            "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
+        },
+    )
+
+    if st.button("⬅ 과거 10일 더보기(매수량)", disabled=(total_netbuy_days <= st.session_state.show_days_buy)):
+        st.session_state.show_days_buy = min(st.session_state.show_days_buy + 10, total_netbuy_days)
+        st.rerun()
+
+
 # ======================================
 # 4. 엑셀 파일 매핑(JSON) 로드
 # ======================================
@@ -1110,6 +1178,9 @@ if "종가" in wb.sheetnames:
 # 12. 지수(KOSPI/KOSDAQ/KOSPI200) 데이터 로딩
 # ======================================
 index_df = None
+netbuy_df_map = {}
+total_netbuy_days = 0
+netbuy_range_msg = ""
 
 if "지수" in wb.sheetnames and indicator_df is not None and selected_labels:
     ws_idx = wb["지수"]
@@ -1170,6 +1241,91 @@ if "지수" in wb.sheetnames and indicator_df is not None and selected_labels:
         index_df = pd.DataFrame(index_rows)
 
 # ======================================
+# 12.5. 매수량(순매수) 데이터 로딩
+# ======================================
+if is_index_target:
+    netbuy_base_sheet = None
+    for _, sheet_name in NETBUY_SHEET_MAP.items():
+        if sheet_name in wb.sheetnames:
+            netbuy_base_sheet = wb[sheet_name]
+            break
+
+    if netbuy_base_sheet is not None:
+        netbuy_date_infos = []
+        for col in range(3, netbuy_base_sheet.max_column + 1):
+            raw = netbuy_base_sheet.cell(row=1, column=col).value
+            if raw is None:
+                continue
+            dt = _to_datetime(raw)
+            if dt is None:
+                continue
+            label = dt.strftime("%Y.%m.%d.")
+            netbuy_date_infos.append((col, raw, dt, label))
+
+        netbuy_date_infos = sorted(
+            netbuy_date_infos,
+            key=lambda x: (x[2] is None, x[2] or datetime.min)
+        )
+
+        total_netbuy_days = len(netbuy_date_infos)
+        if total_netbuy_days > 0:
+            show_buy = min(st.session_state.show_days_buy, total_netbuy_days)
+            start_idx = total_netbuy_days - show_buy
+            selected_buy_infos = netbuy_date_infos[start_idx:]
+            selected_buy_labels = [lbl for _, _, _, lbl in selected_buy_infos]
+
+            netbuy_range_msg = (
+                f"📅 매수량 표시 범위: **{selected_buy_labels[0]} ~ {selected_buy_labels[-1]}** "
+                f"(최근 {show_buy}일 / 전체 {total_netbuy_days}일)"
+            )
+
+            stock_info_norm = {}
+            for code, name in stock_info.items():
+                code_str = str(code).strip()
+                if code_str.isdigit():
+                    code_str = code_str.zfill(6)
+                stock_info_norm[code_str] = name
+
+            for investor_name, sheet_name in NETBUY_SHEET_MAP.items():
+                if sheet_name not in wb.sheetnames:
+                    continue
+                ws_buy = wb[sheet_name]
+
+                label_to_col = {}
+                for col in range(3, ws_buy.max_column + 1):
+                    raw = ws_buy.cell(row=1, column=col).value
+                    if raw is None:
+                        continue
+                    lbl = format_excel_date(raw)
+                    label_to_col[lbl] = col
+
+                buy_dict = {
+                    code: {"종목코드": code, "종목명": name}
+                    for code, name in stock_info_norm.items()
+                }
+
+                for r in range(2, ws_buy.max_row + 1):
+                    code = ws_buy.cell(row=r, column=2).value
+                    if code is None:
+                        continue
+                    code_str = str(code).strip()
+                    if code_str.isdigit():
+                        code_str = code_str.zfill(6)
+                    if code_str not in buy_dict:
+                        continue
+
+                    for lbl in selected_buy_labels:
+                        col_idx = label_to_col.get(lbl)
+                        val = ws_buy.cell(row=r, column=col_idx).value if col_idx else None
+                        buy_dict[code_str][lbl] = val
+
+                df_buy = pd.DataFrame.from_dict(buy_dict, orient="index").reset_index(drop=True)
+                for lbl in selected_buy_labels:
+                    if lbl in df_buy.columns:
+                        df_buy[lbl] = pd.to_numeric(df_buy[lbl], errors="coerce")
+                netbuy_df_map[investor_name] = df_buy
+
+# ======================================
 # 13. 엑셀 파일 닫기
 # ======================================
 wb.close()
@@ -1177,7 +1333,7 @@ wb.close()
 # ======================================
 # 14. 탭 구성 및 렌더링
 # ======================================
-tab_total, tab_metric, tab_raw = st.tabs(["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료"])
+tab_total, tab_metric, tab_raw, tab_netbuy = st.tabs(["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료", "4️⃣ 매수량"])
 
 with tab_total:
     if indicator_df is None:
@@ -1203,6 +1359,14 @@ with tab_raw:
         st.warning("⚠️ 원자료(종가) 데이터를 불러올 수 없습니다.")
     else:
         render_raw_view(close_df, close_range_msg, total_close_days, index_close_rows=index_close_rows if is_index_target else None)
+
+with tab_netbuy:
+    if not is_index_target:
+        st.info("KR_Stocks_Individual에서만 매수량 탭을 지원합니다.")
+    elif not netbuy_df_map:
+        st.warning("⚠️ 매수량(순매수) 시트가 없습니다. stock_history.py 실행 후 다시 확인해 주세요.")
+    else:
+        render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days)
 
 st.markdown("---")
 st.caption("Created by Alicia")

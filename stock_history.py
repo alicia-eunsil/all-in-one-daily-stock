@@ -1,7 +1,8 @@
 """
 File: stock_history.py
-Version: v2.0.0
+Version: v2.1.0
 Role: 한국투자증권 API를 호출해 주식·ETF 히스토리를 가져오고 엑셀의 시세/지수 시트를 갱신한다.
+# 메모: v2.1.0 - KR_Stocks_Individual에 개인/외국인/기관계 순매수(일별) 시트 업데이트 추가
 """
 
 import json
@@ -11,6 +12,12 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 import time
+
+NETBUY_SHEET_BY_KEY = {
+    "personal": "순매수_개인",
+    "foreign": "순매수_외국인",
+    "institution": "순매수_기관계",
+}
 
 
 # =========================
@@ -73,6 +80,18 @@ def get_token(api_key, api_secret, domain):
         print(f"❌ 토큰 요청 실패: {str(e)}")
         if hasattr(e, 'response') and e.response is not None:
             print(f"서버 응답: {e.response.text}")
+        return None
+
+
+def _to_int_safe(v):
+    if v is None:
+        return None
+    s = str(v).replace(",", "").strip()
+    if s == "":
+        return None
+    try:
+        return int(float(s))
+    except Exception:
         return None
 
 
@@ -210,6 +229,66 @@ def fetch_overseas_daily_history(access_token, domain, market_code, symbol,
 
     except Exception as e:
         print(f"❌ 해외 시세 조회 중 에러: {str(e)}")
+        return None
+
+
+def fetch_investor_netbuy_history(access_token, domain, symbol, start_date,
+                                  app_key=None, app_secret=None):
+    """
+    국내 종목별 투자자매매동향(일별) 조회
+    /uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily
+    - 개인/외국인/기관계 순매수 수량만 사용
+    """
+    endpoint = f"{domain}/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily"
+
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_INPUT_ISCD": symbol,
+        "FID_INPUT_DATE_1": start_date,
+        "FID_ORG_ADJ_PRC": "",
+        "FID_ETC_CLS_CODE": "",
+    }
+
+    headers = {
+        "content-type": "application/json; charset=utf-8",
+        "authorization": f"Bearer {access_token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": "FHPTJ04160001",
+        "custtype": "P",
+    }
+
+    try:
+        resp = requests.get(endpoint, headers=headers, params=params, timeout=10)
+
+        if resp.status_code != 200:
+            print(f"❌ 순매수 HTTP {resp.status_code} 에러 ({symbol}): {resp.text}")
+            return None
+
+        data = resp.json()
+        rows = data.get("output2")
+        if not rows:
+            return None
+
+        history = []
+        for row in rows:
+            d = row.get("stck_bsop_date", "")
+            if not d:
+                continue
+            history.append({
+                "date": d,
+                "personal": _to_int_safe(row.get("prsn_ntby_qty")),
+                "foreign": _to_int_safe(row.get("frgn_ntby_qty")),
+                "institution": _to_int_safe(row.get("orgn_ntby_qty")),
+            })
+
+        history.sort(key=lambda x: x["date"])
+        if start_date:
+            history = [h for h in history if h["date"] >= start_date]
+
+        return history or None
+    except Exception as e:
+        print(f"❌ 순매수 조회 중 에러 ({symbol}): {str(e)}")
         return None
 
 
@@ -392,6 +471,115 @@ def save_history_to_excel(data_list, filename, market="KR"):
 
     wb.save(filename)
     print(f"\n✅ 엑셀 파일 저장 완료: {filename}")
+
+
+def save_netbuy_to_excel(data_list, filename, market="KR"):
+    """
+    종목별 일별 투자자 순매수 수량 저장.
+    - 시트: 순매수_개인 / 순매수_외국인 / 순매수_기관계
+    - 행: 종목
+    - 열: 날짜(YYYYMMDD)
+    """
+    try:
+        wb = openpyxl.load_workbook(filename)
+    except FileNotFoundError:
+        wb = openpyxl.Workbook()
+        if "Sheet" in wb.sheetnames:
+            wb.remove(wb["Sheet"])
+
+    all_dates = set()
+    for stock_data in data_list:
+        for daily in stock_data.get("netbuy_history", []) or []:
+            d = daily.get("date")
+            if d:
+                all_dates.add(d)
+
+    if not all_dates:
+        print("\n❌ 순매수 저장할 데이터가 없습니다.")
+        return
+
+    sorted_dates = sorted(all_dates)
+
+    for key, sheet_name in NETBUY_SHEET_BY_KEY.items():
+        if sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            existing_dates = []
+            for col in range(3, sheet.max_column + 1):
+                val = sheet.cell(row=1, column=col).value
+                digits = "".join(ch for ch in str(val) if ch.isdigit())
+                if len(digits) == 8:
+                    existing_dates.append(digits)
+
+            existing_data = {}
+            for row in range(2, sheet.max_row + 1):
+                name = sheet.cell(row=row, column=1).value
+                code = sheet.cell(row=row, column=2).value
+                if not name or not code:
+                    continue
+                code_str = str(code).strip()
+                if market == "KR":
+                    code_key = code_str.zfill(6)
+                else:
+                    code_key = code_str
+                values = {}
+                for col_idx, date_str in enumerate(existing_dates, 3):
+                    values[date_str] = sheet.cell(row=row, column=col_idx).value
+                existing_data[code_key] = {"name": name, "values": values}
+        else:
+            sheet = wb.create_sheet(sheet_name)
+            existing_dates = []
+            existing_data = {}
+
+        merged_dates = sorted(set(existing_dates) | set(sorted_dates))
+
+        # 헤더
+        sheet.cell(row=1, column=1, value="종목명")
+        sheet.cell(row=1, column=2, value="종목코드")
+        for col_idx, date_str in enumerate(merged_dates, 3):
+            cell = sheet.cell(row=1, column=col_idx)
+            cell.value = int(date_str)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
+
+        for col_idx in (1, 2):
+            cell = sheet.cell(row=1, column=col_idx)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
+
+        all_codes = set(existing_data.keys())
+        for stock_data in data_list:
+            all_codes.add(stock_data["code"])
+
+        for row_idx, code in enumerate(sorted(all_codes), start=2):
+            name = existing_data.get(code, {}).get("name")
+            if not name:
+                name = next((s["name"] for s in data_list if s["code"] == code), code)
+
+            sheet.cell(row=row_idx, column=1, value=name)
+            sheet.cell(row=row_idx, column=2, value=code)
+
+            old_values = existing_data.get(code, {}).get("values", {})
+            new_values = {}
+            stock_hist = next((s for s in data_list if s["code"] == code), None)
+            if stock_hist:
+                for daily in stock_hist.get("netbuy_history", []) or []:
+                    d = daily.get("date")
+                    if not d:
+                        continue
+                    new_values[d] = daily.get(key)
+
+            for col_idx, date_str in enumerate(merged_dates, 3):
+                val = new_values.get(date_str, old_values.get(date_str, ""))
+                sheet.cell(row=row_idx, column=col_idx, value=val)
+
+        sheet.column_dimensions["A"].width = 20
+        sheet.column_dimensions["B"].width = 14
+        for col_idx in range(3, len(merged_dates) + 3):
+            col_letter = get_column_letter(col_idx)
+            sheet.column_dimensions[col_letter].width = 12
+
+    wb.save(filename)
+    print(f"\n✅ 순매수 시트 저장 완료: {filename}")
 
 
 def get_latest_date_from_sheet(filename, sheet_name):
@@ -733,7 +921,7 @@ def fetch_us_wrapper(access_token, domain, symbol, start_date, end_date,
 
 
 def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
-                     access_token, market="KR", update_index=False):
+                     access_token, market="KR", update_index=False, update_netbuy=False):
     """
     엑셀 파일 1개 처리:
     - 종목 목록 로드
@@ -764,7 +952,24 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
 
     end_date = today_str
 
+    netbuy_start_date = None
+    if update_netbuy:
+        latest_netbuy = []
+        for sheet_name in NETBUY_SHEET_BY_KEY.values():
+            d = get_latest_date_from_sheet(excel_filename, sheet_name)
+            if d:
+                latest_netbuy.append(d)
+        if latest_netbuy:
+            latest_netbuy_str = max(latest_netbuy)
+            netbuy_start_dt = datetime.strptime(latest_netbuy_str, "%Y%m%d") + timedelta(days=1)
+            netbuy_start_date = netbuy_start_dt.strftime("%Y%m%d")
+            print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_start_date} ~ {today_str}")
+        else:
+            netbuy_start_date = start_date
+            print(f"📅 [{excel_filename}] 순매수 전체 조회(기준): {netbuy_start_date} ~ {today_str}")
+
     data_list = []
+    netbuy_data_list = []
     print(f"\n총 {len(stocks)}개 종목에 대해 조회합니다... ({excel_filename})")
     for i, stock in enumerate(stocks, start=1):
         print(f"  [{i}/{len(stocks)}] {stock['name']}({stock['code']}) ...", end='')
@@ -785,6 +990,22 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
         else:
             print("실패 또는 추가 데이터 없음")
 
+        if update_netbuy and netbuy_start_date and netbuy_start_date <= today_str:
+            netbuy_history = fetch_investor_netbuy_history(
+                access_token=access_token,
+                domain=domain,
+                symbol=stock["code"],
+                start_date=netbuy_start_date,
+                app_key=app_key,
+                app_secret=app_secret,
+            )
+            if netbuy_history:
+                netbuy_data_list.append({
+                    "name": stock["name"],
+                    "code": stock["code"],
+                    "netbuy_history": netbuy_history,
+                })
+
         time.sleep(1)
 
     if data_list:
@@ -799,6 +1020,14 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
             )
     else:
         print(f"\n❌ [{excel_filename}] 저장할 데이터가 없습니다.")
+
+    if update_netbuy:
+        if netbuy_start_date and netbuy_start_date > today_str:
+            print(f"  • [{excel_filename}] 순매수는 이미 최신입니다.")
+        elif netbuy_data_list:
+            save_netbuy_to_excel(netbuy_data_list, filename=excel_filename, market=market)
+        else:
+            print(f"  • [{excel_filename}] 순매수 신규 데이터가 없습니다.")
 
 
 # =========================
@@ -832,10 +1061,10 @@ def main():
     # - fetch_func: 어떤 API 호출할지
     # - update_index: 지수 시트 생성/업데이트 여부
     category_settings = {
-        "KR_Stocks_Individual": {"market": "KR", "fetch_func": fetch_kr_wrapper, "update_index": True},
-        "KR_Stocks_ETF":        {"market": "KR", "fetch_func": fetch_kr_wrapper, "update_index": False},
-        "US_Stocks_Individual": {"market": "US", "fetch_func": fetch_us_wrapper, "update_index": False},
-        "US_Stocks_ETF":        {"market": "US", "fetch_func": fetch_us_wrapper, "update_index": False},
+        "KR_Stocks_Individual": {"market": "KR", "fetch_func": fetch_kr_wrapper, "update_index": True, "update_netbuy": True},
+        "KR_Stocks_ETF":        {"market": "KR", "fetch_func": fetch_kr_wrapper, "update_index": False, "update_netbuy": False},
+        "US_Stocks_Individual": {"market": "US", "fetch_func": fetch_us_wrapper, "update_index": False, "update_netbuy": False},
+        "US_Stocks_ETF":        {"market": "US", "fetch_func": fetch_us_wrapper, "update_index": False, "update_netbuy": False},
     }
 
     for category_name, excel_filename in file_config.items():
@@ -857,7 +1086,8 @@ def main():
             domain=domain,
             access_token=access_token,
             market=cfg["market"],
-            update_index=cfg["update_index"]
+            update_index=cfg["update_index"],
+            update_netbuy=cfg.get("update_netbuy", False),
         )
 
 
