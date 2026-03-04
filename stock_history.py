@@ -1,8 +1,9 @@
 """
 File: stock_history.py
-Version: v2.1.0
+Version: v2.2.0
 Role: 한국투자증권 API를 호출해 주식·ETF 히스토리를 가져오고 엑셀의 시세/지수 시트를 갱신한다.
 # 메모: v2.1.0 - KR_Stocks_Individual에 개인/외국인/기관계 순매수(일별) 시트 업데이트 추가
+# 메모: v2.2.0 - 순매수는 날짜별 단건 조회로 저장 + 최초 1회 전체 동기화 후 증분 업데이트
 """
 
 import json
@@ -18,6 +19,9 @@ NETBUY_SHEET_BY_KEY = {
     "foreign": "순매수_외국인",
     "institution": "순매수_기관계",
 }
+NETBUY_META_SHEET_NAME = "__meta_netbuy"
+NETBUY_SYNC_VERSION = "v2_daily_by_date"
+NETBUY_INITIAL_LOOKBACK_DAYS = 100
 
 
 # =========================
@@ -232,7 +236,7 @@ def fetch_overseas_daily_history(access_token, domain, market_code, symbol,
         return None
 
 
-def fetch_investor_netbuy_history(access_token, domain, symbol, start_date,
+def fetch_investor_netbuy_by_date(access_token, domain, symbol, query_date,
                                   app_key=None, app_secret=None):
     """
     국내 종목별 투자자매매동향(일별) 조회
@@ -244,7 +248,7 @@ def fetch_investor_netbuy_history(access_token, domain, symbol, start_date,
     params = {
         "FID_COND_MRKT_DIV_CODE": "J",
         "FID_INPUT_ISCD": symbol,
-        "FID_INPUT_DATE_1": start_date,
+        "FID_INPUT_DATE_1": query_date,
         "FID_ORG_ADJ_PRC": "",
         "FID_ETC_CLS_CODE": "",
     }
@@ -270,25 +274,23 @@ def fetch_investor_netbuy_history(access_token, domain, symbol, start_date,
         if not rows:
             return None
 
-        history = []
+        target_row = None
         for row in rows:
-            d = row.get("stck_bsop_date", "")
-            if not d:
-                continue
-            history.append({
-                "date": d,
-                "personal": _to_int_safe(row.get("prsn_ntby_qty")),
-                "foreign": _to_int_safe(row.get("frgn_ntby_qty")),
-                "institution": _to_int_safe(row.get("orgn_ntby_qty")),
-            })
+            if row.get("stck_bsop_date") == query_date:
+                target_row = row
+                break
 
-        history.sort(key=lambda x: x["date"])
-        if start_date:
-            history = [h for h in history if h["date"] >= start_date]
+        if not target_row:
+            return None
 
-        return history or None
+        return {
+            "date": query_date,
+            "personal": _to_int_safe(target_row.get("prsn_ntby_qty")),
+            "foreign": _to_int_safe(target_row.get("frgn_ntby_qty")),
+            "institution": _to_int_safe(target_row.get("orgn_ntby_qty")),
+        }
     except Exception as e:
-        print(f"❌ 순매수 조회 중 에러 ({symbol}): {str(e)}")
+        print(f"❌ 순매수 조회 중 에러 ({symbol}, {query_date}): {str(e)}")
         return None
 
 
@@ -604,6 +606,59 @@ def get_latest_date_from_sheet(filename, sheet_name):
     except Exception as e:
         print(f"❌ 날짜 추출 에러({filename}/{sheet_name}): {e}")
         return None
+
+
+def get_all_dates_from_sheet(filename, sheet_name):
+    """지정 시트의 헤더 날짜를 오름차순 YYYYMMDD 문자열 리스트로 반환"""
+    try:
+        wb = openpyxl.load_workbook(filename, read_only=True, data_only=True)
+        if sheet_name not in wb.sheetnames:
+            wb.close()
+            return []
+        sheet = wb[sheet_name]
+
+        dates = []
+        for col in range(3, sheet.max_column + 1):
+            v = sheet.cell(row=1, column=col).value
+            digits = "".join(ch for ch in str(v) if ch.isdigit())
+            if len(digits) == 8:
+                dates.append(digits)
+        wb.close()
+        return sorted(set(dates))
+    except Exception as e:
+        print(f"❌ 날짜 목록 추출 에러({filename}/{sheet_name}): {e}")
+        return []
+
+
+def get_netbuy_sync_version(filename):
+    try:
+        wb = openpyxl.load_workbook(filename)
+        if NETBUY_META_SHEET_NAME not in wb.sheetnames:
+            wb.close()
+            return None
+        ws = wb[NETBUY_META_SHEET_NAME]
+        version = ws["B1"].value
+        wb.close()
+        return str(version) if version else None
+    except Exception as e:
+        print(f"❌ 순매수 메타 읽기 에러({filename}): {e}")
+        return None
+
+
+def set_netbuy_sync_version(filename, version):
+    try:
+        wb = openpyxl.load_workbook(filename)
+        if NETBUY_META_SHEET_NAME in wb.sheetnames:
+            ws = wb[NETBUY_META_SHEET_NAME]
+        else:
+            ws = wb.create_sheet(NETBUY_META_SHEET_NAME)
+            ws.sheet_state = "hidden"
+        ws["A1"] = "netbuy_sync_version"
+        ws["B1"] = version
+        wb.save(filename)
+        wb.close()
+    except Exception as e:
+        print(f"❌ 순매수 메타 저장 에러({filename}): {e}")
 
 
 # =========================
@@ -952,23 +1007,51 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
 
     end_date = today_str
 
-    netbuy_start_date = None
+    netbuy_target_dates = []
+    should_set_netbuy_sync_version = False
     if update_netbuy:
+        close_dates = get_all_dates_from_sheet(excel_filename, "종가")
         latest_netbuy = []
-        for sheet_name in NETBUY_SHEET_BY_KEY.values():
-            d = get_latest_date_from_sheet(excel_filename, sheet_name)
+        for netbuy_sheet_name in NETBUY_SHEET_BY_KEY.values():
+            d = get_latest_date_from_sheet(excel_filename, netbuy_sheet_name)
             if d:
                 latest_netbuy.append(d)
-        if latest_netbuy:
-            latest_netbuy_str = max(latest_netbuy)
-            netbuy_start_dt = datetime.strptime(latest_netbuy_str, "%Y%m%d") + timedelta(days=1)
-            netbuy_start_date = netbuy_start_dt.strftime("%Y%m%d")
-            print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_start_date} ~ {today_str}")
+
+        sync_version = get_netbuy_sync_version(excel_filename)
+        if sync_version != NETBUY_SYNC_VERSION:
+            # 기존 시트가 있으면 그 기간 전체를 재동기화(잘못 저장된 과거값 정정)
+            existing_netbuy_dates = set()
+            for netbuy_sheet_name in NETBUY_SHEET_BY_KEY.values():
+                existing_netbuy_dates.update(get_all_dates_from_sheet(excel_filename, netbuy_sheet_name))
+
+            if existing_netbuy_dates:
+                netbuy_target_dates = sorted(existing_netbuy_dates)
+            else:
+                # 순매수 시트가 아예 없는 첫 생성 케이스는 최근 구간만 초기 동기화
+                fallback_start = (today - timedelta(days=NETBUY_INITIAL_LOOKBACK_DAYS)).strftime("%Y%m%d")
+                netbuy_target_dates = [d for d in close_dates if d >= fallback_start]
+
+            should_set_netbuy_sync_version = True
+            if netbuy_target_dates:
+                print(f"📅 [{excel_filename}] 순매수 초기 동기화(전체 정정): {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)")
+            else:
+                print(f"📅 [{excel_filename}] 순매수 초기 동기화: 대상 날짜 없음")
         else:
-            # 순매수 시트가 처음 생성되는 경우에는 시세 증분 시작일(start_date)을 재사용하지 않고
-            # 최근 100일 기준으로 최초 데이터를 채운다.
-            netbuy_start_date = (today - timedelta(days=100)).strftime("%Y%m%d")
-            print(f"📅 [{excel_filename}] 순매수 전체 조회(최초): {netbuy_start_date} ~ {today_str}")
+            if latest_netbuy:
+                latest_netbuy_str = max(latest_netbuy)
+                netbuy_target_dates = [d for d in close_dates if d > latest_netbuy_str]
+                if netbuy_target_dates:
+                    print(f"📅 [{excel_filename}] 순매수 추가 조회: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)")
+                else:
+                    print(f"📅 [{excel_filename}] 순매수는 이미 최신입니다.")
+            else:
+                # 메타는 있는데 시트가 없는 비정상 케이스 방어: 최근 100일 기준 재생성
+                netbuy_start_fallback = (today - timedelta(days=100)).strftime("%Y%m%d")
+                netbuy_target_dates = [d for d in close_dates if d >= netbuy_start_fallback]
+                if netbuy_target_dates:
+                    print(f"📅 [{excel_filename}] 순매수 재생성: {netbuy_target_dates[0]} ~ {netbuy_target_dates[-1]} ({len(netbuy_target_dates)}일)")
+                else:
+                    print(f"📅 [{excel_filename}] 순매수 재생성 대상 날짜 없음")
 
     data_list = []
     netbuy_data_list = []
@@ -992,15 +1075,20 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
         else:
             print("실패 또는 추가 데이터 없음")
 
-        if update_netbuy and netbuy_start_date and netbuy_start_date <= today_str:
-            netbuy_history = fetch_investor_netbuy_history(
-                access_token=access_token,
-                domain=domain,
-                symbol=stock["code"],
-                start_date=netbuy_start_date,
-                app_key=app_key,
-                app_secret=app_secret,
-            )
+        if update_netbuy and netbuy_target_dates:
+            netbuy_history = []
+            for query_date in netbuy_target_dates:
+                day_row = fetch_investor_netbuy_by_date(
+                    access_token=access_token,
+                    domain=domain,
+                    symbol=stock["code"],
+                    query_date=query_date,
+                    app_key=app_key,
+                    app_secret=app_secret,
+                )
+                if day_row:
+                    netbuy_history.append(day_row)
+
             if netbuy_history:
                 netbuy_data_list.append({
                     "name": stock["name"],
@@ -1024,12 +1112,15 @@ def process_one_file(excel_filename, fetch_func, app_key, app_secret, domain,
         print(f"\n❌ [{excel_filename}] 저장할 데이터가 없습니다.")
 
     if update_netbuy:
-        if netbuy_start_date and netbuy_start_date > today_str:
-            print(f"  • [{excel_filename}] 순매수는 이미 최신입니다.")
-        elif netbuy_data_list:
+        if netbuy_data_list:
             save_netbuy_to_excel(netbuy_data_list, filename=excel_filename, market=market)
+            if should_set_netbuy_sync_version:
+                set_netbuy_sync_version(excel_filename, NETBUY_SYNC_VERSION)
+                print(f"✅ [{excel_filename}] 순매수 동기화 버전 저장: {NETBUY_SYNC_VERSION}")
+        elif not netbuy_target_dates:
+            print(f"  • [{excel_filename}] 순매수는 이미 최신입니다.")
         else:
-            print(f"  • [{excel_filename}] 순매수 신규 데이터가 없습니다.")
+            print(f"  • [{excel_filename}] 순매수 신규 데이터가 없습니다. (대상일 {len(netbuy_target_dates)}일)")
 
 
 # =========================
