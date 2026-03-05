@@ -749,13 +749,13 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
         "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
     }
     for c in date_cols:
-        column_config[c] = st.column_config.NumberColumn(c, format="%,.0f", width="small")
+        column_config[c] = st.column_config.NumberColumn(c, width="small")
 
     for c in date_cols:
         df_raw[c] = pd.to_numeric(df_raw[c], errors="coerce")
 
     st.dataframe(
-        df_raw,
+        df_raw.style.format({c: "{:,.0f}" for c in date_cols}, na_rep="-"),
         use_container_width=True,
         hide_index=True,
         column_config=column_config,
