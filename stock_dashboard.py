@@ -755,7 +755,7 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
         df_raw[c] = pd.to_numeric(df_raw[c], errors="coerce")
 
     st.dataframe(
-        df_raw.style.format({c: "{:,.0f}" for c in date_cols}, na_rep="-"),
+        df_raw,
         use_container_width=True,
         hide_index=True,
         column_config=column_config,
