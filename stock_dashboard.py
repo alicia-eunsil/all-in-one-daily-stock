@@ -744,28 +744,18 @@ def render_raw_view(close_df, close_range_msg, total_close_days, index_close_row
                 new_row[c] = row.get(c, None)
             df_raw.loc[len(df_raw)] = new_row
 
-    # 표시는 문자열로 분기 포맷팅: 종목은 정수, 지수는 소수 둘째자리
-    index_codes = {str(r.get("업종코드", "")) for r in index_close_rows} if index_close_rows else set()
-    df_display = df_raw.copy()
-    for idx, row in df_display.iterrows():
-        is_index_row = str(row["종목코드"]) in index_codes
-        for c in date_cols:
-            num = pd.to_numeric(row[c], errors="coerce")
-            if pd.isna(num):
-                row[c] = "-"
-            else:
-                row[c] = f"{num:.2f}" if is_index_row else f"{num:.0f}"
-        df_display.loc[idx] = row
-
     column_config = {
         "종목코드": st.column_config.TextColumn("종목코드", width="small", pinned="left"),
         "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
     }
     for c in date_cols:
-        column_config[c] = st.column_config.TextColumn(c, width="small")
+        column_config[c] = st.column_config.NumberColumn(c, format="%,.0f", width="small")
+
+    for c in date_cols:
+        df_raw[c] = pd.to_numeric(df_raw[c], errors="coerce")
 
     st.dataframe(
-        df_display,
+        df_raw.style.format({c: "{:,.0f}" for c in date_cols}, na_rep="-"),
         use_container_width=True,
         hide_index=True,
         column_config=column_config,
@@ -835,7 +825,7 @@ def render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days):
     df_show = df_show.reindex(columns=ordered_cols)
 
     st.dataframe(
-        df_show.style.format("{:.0f}", na_rep="-"),
+        df_show.style.format("{:,.0f}", na_rep="-"),
         use_container_width=True,
     )
 
