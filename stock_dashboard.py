@@ -486,8 +486,11 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     fmt_map = {}
     for col in (z_columns_total + s_columns_total + gap20_columns_total + gap60_columns_total + quant_columns_total):
         fmt_map[col] = "{:.0f}"
-    for col in std_columns_total + sigmat_columns_total:
+    for col in std_columns_total:
         fmt_map[col] = "{:.2f}"
+    # STD20은 실제 표준편차 절대값이라 큰 수가 나올 수 있어 천단위 콤마를 표시한다.
+    for col in sigmat_columns_total:
+        fmt_map[col] = "{:,.2f}"
 
     styler = df_show.style.format(fmt_map, na_rep="-")
 
@@ -678,7 +681,9 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             allowed_mask.iloc[idx_avg_idx] = False
 
     # 스타일 (색상 강조)
-    styler = df_filtered.style.format({lbl: ("{:.2f}" if metric in ("STD", "STD20") else "{:.0f}") for lbl in selected_labels}, na_rep="-")
+    # STD20은 화면 가독성을 위해 천단위 콤마를 포함해 표시한다.
+    metric_fmt = "{:,.2f}" if metric == "STD20" else ("{:.2f}" if metric == "STD" else "{:.0f}")
+    styler = df_filtered.style.format({lbl: metric_fmt for lbl in selected_labels}, na_rep="-")
     if metric.startswith("GAP"):
         styler = _highlight_row_min_max_cells(styler, gap_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
     elif metric in ("STD", "STD20"):
