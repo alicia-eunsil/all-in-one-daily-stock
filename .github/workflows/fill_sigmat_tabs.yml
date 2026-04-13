@@ -1,0 +1,57 @@
+name: Fill SIGMA_T Tabs
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_file:
+        description: "대상 엑셀 파일명. 비워두면 4개 전체 처리"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  run-fill-sigmat:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install openpyxl pandas numpy
+          fi
+
+      - name: Run SIGMA_T backfill script
+        run: |
+          if [ -n "${{ github.event.inputs.target_file }}" ]; then
+            python temp/fill_sigmat_tabs.py --file "${{ github.event.inputs.target_file }}"
+          else
+            python temp/fill_sigmat_tabs.py
+          fi
+
+      - name: Commit and push changes (if any)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -n "$(git status --porcelain -- '*.xlsx')" ]; then
+            git add *.xlsx
+            git commit -m "Backfill SIGMA_T tabs"
+            git push
+          else
+            echo "No Excel changes to commit."
+          fi
