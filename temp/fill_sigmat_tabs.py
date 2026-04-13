@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+FILE_MAP_PATH = BASE_DIR / "stock_file_map.json"
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 from extra_scores import (
     INDEX_TARGET_STEM,
@@ -17,10 +23,6 @@ from extra_scores import (
     get_index_data,
     save_sigma_t_sheet,
 )
-
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-FILE_MAP_PATH = BASE_DIR / "stock_file_map.json"
 
 
 def load_target_files() -> list[Path]:
