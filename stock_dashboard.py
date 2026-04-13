@@ -296,6 +296,7 @@ def _load_index_metric_data(wb, selected_labels):
         "GAP20": "igap",
         "GAP60": "igap60",
         "STD": "istd",
+        "SIGMA_T": "isigmat",
     }
     combined = {}
     per_metric = {}
@@ -368,7 +369,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # --------------------------------------
     # 🔥 멀티헤더 생성 (1행: 날짜, 2행: 지표명)
     # --------------------------------------
-    metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD"]
+    metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD", "SIGMA_T"]
     base_cols = ["종목코드", "종목명"]
     df_show = df_f[base_cols].copy()
 
@@ -439,7 +440,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # Z/S/Q/GAP20/GAP60 포맷 적용
     # --------------------------------------
     for lbl in selected_labels:
-        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "STD", "QUANT"]:
+        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "STD", "SIGMA_T", "QUANT"]:
             col = (lbl, m)
             if col in df_show.columns:
                 df_show[col] = pd.to_numeric(df_show[col], errors="coerce")
@@ -449,6 +450,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     gap20_columns_total = [(lbl, "GAP20") for lbl in selected_labels if (lbl, "GAP20") in df_show.columns]
     gap60_columns_total = [(lbl, "GAP60") for lbl in selected_labels if (lbl, "GAP60") in df_show.columns]
     std_columns_total = [(lbl, "STD") for lbl in selected_labels if (lbl, "STD") in df_show.columns]
+    sigmat_columns_total = [(lbl, "SIGMA_T") for lbl in selected_labels if (lbl, "SIGMA_T") in df_show.columns]
     quant_columns_total = [(lbl, "QUANT") for lbl in selected_labels if (lbl, "QUANT") in df_show.columns]
 
     # --------------------------------------
@@ -482,7 +484,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     fmt_map = {}
     for col in (z_columns_total + s_columns_total + gap20_columns_total + gap60_columns_total + quant_columns_total):
         fmt_map[col] = "{:.0f}"
-    for col in std_columns_total:
+    for col in std_columns_total + sigmat_columns_total:
         fmt_map[col] = "{:.2f}"
 
     styler = df_show.style.format(fmt_map, na_rep="-")
@@ -541,7 +543,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
 
     metric_options = ["Z20", "Z60", "Z120",
                       "S20", "S60", "S120",
-                      "GAP20", "GAP60", "QUANT", "STD"]
+                      "GAP20", "GAP60", "QUANT", "STD", "SIGMA_T"]
 
     # 실제 존재하는 지표만
     available = []
@@ -550,7 +552,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             available.append(m)
 
     if not available:
-        st.error("indicator_df에 S/Z/GAP20/GAP60/QUANT/STD 관련 컬럼이 없습니다.")
+        st.error("indicator_df에 S/Z/GAP20/GAP60/QUANT/STD/SIGMA_T 관련 컬럼이 없습니다.")
         st.write("현재 indicator_df.columns 예시:", list(indicator_df.columns)[:20])
         return
 
@@ -599,7 +601,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     std_columns_metric = []
     if metric in ("GAP20", "GAP60"):
         gap_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
-    elif metric == "STD":
+    elif metric in ("STD", "SIGMA_T"):
         std_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
 
     # 평균 행 추가
@@ -655,7 +657,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     }
     for lbl in selected_labels:
         if lbl in df_filtered.columns:
-            column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric == "STD" else "%.0f")
+            column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric in ("STD", "SIGMA_T") else "%.0f")
 
     # 강조에서 평균/지수 행 제외
     base_len = len(df_filtered_display)  # 순수 종목 행 개수
@@ -674,10 +676,10 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             allowed_mask.iloc[idx_avg_idx] = False
 
     # 스타일 (색상 강조)
-    styler = df_filtered.style.format({lbl: ("{:.2f}" if metric == "STD" else "{:.0f}") for lbl in selected_labels}, na_rep="-")
+    styler = df_filtered.style.format({lbl: ("{:.2f}" if metric in ("STD", "SIGMA_T") else "{:.0f}") for lbl in selected_labels}, na_rep="-")
     if metric.startswith("GAP"):
         styler = _highlight_row_min_max_cells(styler, gap_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
-    elif metric == "STD":
+    elif metric in ("STD", "SIGMA_T"):
         styler = _highlight_row_min_max_cells(styler, std_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
     elif metric.startswith("Z"):
         styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
@@ -968,7 +970,7 @@ if "종목" in wb.sheetnames:
 # ======================================
 # 10. 종합(Z20/Z30/Z60/Z120/S/GAP20/GAP60/QUANT/STD) 데이터 로딩
 # ======================================
-sheet_names = ["z20", "z30", "z60", "z120", "s20", "s60", "s120", "gap", "gap60", "quant", "std"]
+sheet_names = ["z20", "z30", "z60", "z120", "s20", "s60", "s120", "gap", "gap60", "quant", "std", "sigmat"]
 display_metric_by_sheet = {
     "gap": "GAP20",
     "gap60": "GAP60",

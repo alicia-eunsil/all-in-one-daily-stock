@@ -1,9 +1,10 @@
 """
 File: extra_scores.py
-Version: v3.1.0
+Version: v3.2.0
 Role: 가격·거래량 히스토리로 GAP/QUANT/STD 시트를 증분 계산한다.
 # 메모: v3.0.0 - KR_Stocks_Individual 대상 지수(igap/istd) 계산 지원
 # 메모: v3.1.0 - GAP60/IGAP60 계산 추가
+# 메모: v3.2.0 - STD 계산 중 sigma_t를 별도 sigmat/isigmat 시트로 저장
 """
 
 # gap, quant, std 전체 계산 모듈
@@ -231,6 +232,26 @@ def calc_std_value(prices, idx, window_std=20, window_mean=20):
     raw_val = (std_today / avg_std - 1) * 100
     val = float(Decimal(str(raw_val)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
     return val
+
+
+def calc_sigma_t_value(prices, idx, window_std=20):
+    """
+    sigma_t 계산:
+    - idx 시점에서 최근 window_std일 가격의 표준편차
+    - 소수 둘째 자리까지 반올림
+    """
+    if idx < window_std - 1:
+        return None
+
+    start = idx - window_std + 1
+    end = idx + 1
+    window_prices = prices[start:end]
+    if any(p is None for p in window_prices):
+        return None
+
+    arr = np.array(window_prices, dtype=float)
+    sigma = float(np.std(arr, ddof=0))
+    return float(Decimal(str(sigma)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
 # =========================
@@ -478,6 +499,47 @@ def save_std_sheet(filename, dates, stocks, sheet_name='std', window_std=20, win
     print(f"✅ STD 업데이트 완료: {filename} (신규 {len(valid_dates) - existing_count}일)")
 
 
+def save_sigma_t_sheet(filename, dates, stocks, sheet_name='sigmat', window_std=20,
+                       name_header="종목명", code_header="종목코드"):
+    min_idx = window_std - 1
+    if len(dates) <= min_idx:
+        print(f"⚠ SIGMA_T: 데이터가 부족합니다. ({filename})")
+        return
+
+    valid_dates = dates[min_idx:]
+    wb = load_or_create_workbook(filename)
+    sheet, existing_dates, code_to_row, new_codes = ensure_metric_sheet(
+        wb, sheet_name, stocks, name_header=name_header, code_header=code_header)
+
+    stock_map = {}
+    for stock in stocks:
+        code = str(stock['code'])
+        stock_map[code] = {'series': stock['prices']}
+        if code in new_codes:
+            stock_map[code]['_needs_backfill'] = True
+
+    def calc_func(series, idx_global):
+        i = min_idx + idx_global
+        if i >= len(series):
+            return None
+        return calc_sigma_t_value(series, i, window_std=window_std)
+
+    existing_count = len(existing_dates)
+    fill_existing_for_new_codes(sheet, code_to_row, stock_map, existing_count, calc_func)
+
+    if existing_count >= len(valid_dates):
+        wb.save(filename)
+        print(f"✅ SIGMA_T: 신규 날짜 없음 ({filename})")
+        return
+
+    append_metric_columns(sheet, code_to_row, stock_map, existing_count, valid_dates, calc_func)
+    sheet.column_dimensions['A'].width = 40
+    sheet.column_dimensions['B'].width = 12
+
+    wb.save(filename)
+    print(f"✅ SIGMA_T 업데이트 완료: {filename} (신규 {len(valid_dates) - existing_count}일)")
+
+
 # =========================
 # 7. 통합 실행 함수
 # =========================
@@ -491,6 +553,7 @@ def run_extra_scores(filename):
         save_gap_sheet(filename, close_dates, close_stocks, window=20, sheet_name='gap')
         save_gap_sheet(filename, close_dates, close_stocks, window=60, sheet_name='gap60')
         save_std_sheet(filename, close_dates, close_stocks, sheet_name='std', window_std=20, window_mean=20)
+        save_sigma_t_sheet(filename, close_dates, close_stocks, sheet_name='sigmat', window_std=20)
     else:
         print("⚠ 종가 데이터가 없어 GAP(20/60)/STD 계산을 건너뜁니다.")
 
@@ -534,8 +597,17 @@ def run_extra_scores(filename):
                 name_header="업종명",
                 code_header="업종코드",
             )
+            save_sigma_t_sheet(
+                filename,
+                idx_dates,
+                idx_stocks,
+                sheet_name='isigmat',
+                window_std=20,
+                name_header="업종명",
+                code_header="업종코드",
+            )
         else:
-            print("⚠ 지수 데이터가 없어 igap/igap60/istd 계산을 건너뜁니다.")
+            print("⚠ 지수 데이터가 없어 igap/igap60/istd/isigmat 계산을 건너뜁니다.")
 
     print(f"=== EXTRA SCORES 계산 완료: {filename} ===\n")
 
