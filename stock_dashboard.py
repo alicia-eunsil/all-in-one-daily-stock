@@ -644,7 +644,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     std_columns_metric = []
     if metric in ("GAP20", "GAP60"):
         gap_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
-    elif metric in ("STD", "STD20"):
+    elif metric == "STD":
         std_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
 
     # 평균 행 추가
@@ -724,7 +724,8 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     styler = df_filtered.style.format({lbl: metric_fmt for lbl in selected_labels}, na_rep="-")
     if metric.startswith("GAP"):
         styler = _highlight_row_min_max_cells(styler, gap_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
-    elif metric in ("STD", "STD20"):
+    # STD20은 아직 강조 규칙이 확정되지 않아 지표별 탭에서는 색상 강조를 적용하지 않는다.
+    elif metric == "STD":
         styler = _highlight_row_min_max_cells(styler, std_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
     elif metric.startswith("Z"):
         styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
