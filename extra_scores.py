@@ -1,10 +1,11 @@
 """
 File: extra_scores.py
-Version: v3.2.0
+Version: v3.2.1
 Role: 가격·거래량 히스토리로 GAP/QUANT/STD 시트를 증분 계산한다.
 # 메모: v3.0.0 - KR_Stocks_Individual 대상 지수(igap/istd) 계산 지원
 # 메모: v3.1.0 - GAP60/IGAP60 계산 추가
-# 메모: v3.2.0 - STD 계산 중 sigma_t를 별도 sigmat/isigmat 시트로 저장
+# 메모: v3.2.0 - STD 계산 중 20일 표준편차를 sigmat/isigmat 시트로 저장
+# 메모: v3.2.1 - 로그/주석에서 sigmat를 의미 기준인 STD20으로 설명
 """
 
 # gap, quant, std 전체 계산 모듈
@@ -236,7 +237,7 @@ def calc_std_value(prices, idx, window_std=20, window_mean=20):
 
 def calc_sigma_t_value(prices, idx, window_std=20):
     """
-    sigma_t 계산:
+    20일 표준편차 계산:
     - idx 시점에서 최근 window_std일 가격의 표준편차
     - 소수 둘째 자리까지 반올림
     """
@@ -503,7 +504,8 @@ def save_sigma_t_sheet(filename, dates, stocks, sheet_name='sigmat', window_std=
                        name_header="종목명", code_header="종목코드"):
     min_idx = window_std - 1
     if len(dates) <= min_idx:
-        print(f"⚠ SIGMA_T: 데이터가 부족합니다. ({filename})")
+        # sigmat/isigmat는 내부 시트명이지만 의미는 "20일 표준편차"다.
+        print(f"⚠ STD20: 데이터가 부족합니다. ({filename})")
         return
 
     valid_dates = dates[min_idx:]
@@ -529,7 +531,7 @@ def save_sigma_t_sheet(filename, dates, stocks, sheet_name='sigmat', window_std=
 
     if existing_count >= len(valid_dates):
         wb.save(filename)
-        print(f"✅ SIGMA_T: 신규 날짜 없음 ({filename})")
+        print(f"✅ STD20: 신규 날짜 없음 ({filename})")
         return
 
     append_metric_columns(sheet, code_to_row, stock_map, existing_count, valid_dates, calc_func)
@@ -537,7 +539,7 @@ def save_sigma_t_sheet(filename, dates, stocks, sheet_name='sigmat', window_std=
     sheet.column_dimensions['B'].width = 12
 
     wb.save(filename)
-    print(f"✅ SIGMA_T 업데이트 완료: {filename} (신규 {len(valid_dates) - existing_count}일)")
+    print(f"✅ STD20 업데이트 완료: {filename} (신규 {len(valid_dates) - existing_count}일)")
 
 
 # =========================

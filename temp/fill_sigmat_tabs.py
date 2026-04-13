@@ -1,8 +1,8 @@
 """
 File: fill_sigmat_tabs.py
 Version: v1.0.0
-Role: 기존 엑셀의 종가/지수 데이터를 바탕으로 sigmat/isigmat 시트를 채운다.
-# 메모: v1.0.0 - sigma_t 전용 백필 패치 스크립트 추가
+Role: 기존 엑셀의 종가/지수 데이터를 바탕으로 sigmat/isigmat(STD20) 시트를 채운다.
+# 메모: v1.0.0 - 20일 표준편차(STD20) 전용 백필 패치 스크립트 추가
 """
 
 from __future__ import annotations
@@ -36,7 +36,8 @@ def fill_sigmat_for_file(excel_path: Path) -> None:
         print(f"⚠ 파일이 없어 건너뜁니다: {excel_path.name}")
         return
 
-    print(f"\n=== SIGMA_T 패치 시작: {excel_path.name} ===")
+    # 시트명은 sigmat/isigmat를 유지하지만, 의미는 20일 표준편차(STD20)다.
+    print(f"\n=== STD20 패치 시작: {excel_path.name} ===")
 
     close_dates, close_stocks = get_close_data(excel_path)
     if close_dates and close_stocks:
@@ -48,7 +49,7 @@ def fill_sigmat_for_file(excel_path: Path) -> None:
             window_std=20,
         )
     else:
-        print("⚠ 종가 데이터가 없어 sigmat 계산을 건너뜁니다.")
+        print("⚠ 종가 데이터가 없어 STD20 계산을 건너뜁니다.")
 
     if excel_path.stem == INDEX_TARGET_STEM:
         idx_dates, idx_stocks = get_index_data(excel_path)
@@ -63,14 +64,14 @@ def fill_sigmat_for_file(excel_path: Path) -> None:
                 code_header="업종코드",
             )
         else:
-            print("⚠ 지수 데이터가 없어 isigmat 계산을 건너뜁니다.")
+            print("⚠ 지수 데이터가 없어 지수 STD20 계산을 건너뜁니다.")
 
-    print(f"=== SIGMA_T 패치 완료: {excel_path.name} ===")
+    print(f"=== STD20 패치 완료: {excel_path.name} ===")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="기존 엑셀 데이터로 sigmat/isigmat 시트를 채웁니다."
+        description="기존 엑셀 데이터로 sigmat/isigmat(STD20) 시트를 채웁니다."
     )
     parser.add_argument(
         "--file",

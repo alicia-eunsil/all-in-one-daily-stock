@@ -1,4 +1,4 @@
-name: Fill SIGMA_T Tabs
+name: Fill STD20 Tabs
 
 on:
   workflow_dispatch:
@@ -35,7 +35,7 @@ jobs:
             pip install openpyxl pandas numpy
           fi
 
-      - name: Run SIGMA_T backfill script
+      - name: Run STD20 backfill script
         run: |
           if [ -n "${{ github.event.inputs.target_file }}" ]; then
             python temp/fill_sigmat_tabs.py --file "${{ github.event.inputs.target_file }}"
@@ -50,7 +50,7 @@ jobs:
 
           if [ -n "$(git status --porcelain -- '*.xlsx')" ]; then
             git add *.xlsx
-            git commit -m "Backfill SIGMA_T tabs"
+            git commit -m "Backfill STD20 tabs"
             git push
           else
             echo "No Excel changes to commit."

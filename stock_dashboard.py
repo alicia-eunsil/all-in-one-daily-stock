@@ -1,6 +1,6 @@
 """
 File: stock_dashboard.py
-Version: v4.2.0
+Version: v4.2.1
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
 # 메모: v4.0.1 - GAP/STD 상하위 강조 시 평균·지수 행 제외 + 동률 포함, 불필요 포맷 함수 제거
 # 메모: v4.0.2 - Z30 출력 추가
@@ -8,6 +8,7 @@ Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보�
 # 메모: v4.1.0 - GAP 시트는 GAP20으로 표시하고 GAP60(=gap60) 지표를 추가
 # 메모: v4.1.1 - 데이터프레임 높이를 브라우저 높이(100vh) 기반으로 동적 조정
 # 메모: v4.2.0 - KR_Stocks_Individual에 개인/외국인/기관계 순매수(일별) '매수량' 탭 추가
+# 메모: v4.2.1 - sigmat/isigmat는 화면에서 20일 표준편차 의미인 STD20으로 표시
 """
 
 import streamlit as st
@@ -296,7 +297,8 @@ def _load_index_metric_data(wb, selected_labels):
         "GAP20": "igap",
         "GAP60": "igap60",
         "STD": "istd",
-        "SIGMA_T": "isigmat",
+        # 저장 시트명은 isigmat를 유지하되, 화면에서는 의미 기준으로 STD20으로 노출한다.
+        "STD20": "isigmat",
     }
     combined = {}
     per_metric = {}
@@ -369,7 +371,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # --------------------------------------
     # 🔥 멀티헤더 생성 (1행: 날짜, 2행: 지표명)
     # --------------------------------------
-    metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD", "SIGMA_T"]
+    metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD", "STD20"]
     base_cols = ["종목코드", "종목명"]
     df_show = df_f[base_cols].copy()
 
@@ -440,7 +442,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # Z/S/Q/GAP20/GAP60 포맷 적용
     # --------------------------------------
     for lbl in selected_labels:
-        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "STD", "SIGMA_T", "QUANT"]:
+        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "STD", "STD20", "QUANT"]:
             col = (lbl, m)
             if col in df_show.columns:
                 df_show[col] = pd.to_numeric(df_show[col], errors="coerce")
@@ -450,7 +452,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     gap20_columns_total = [(lbl, "GAP20") for lbl in selected_labels if (lbl, "GAP20") in df_show.columns]
     gap60_columns_total = [(lbl, "GAP60") for lbl in selected_labels if (lbl, "GAP60") in df_show.columns]
     std_columns_total = [(lbl, "STD") for lbl in selected_labels if (lbl, "STD") in df_show.columns]
-    sigmat_columns_total = [(lbl, "SIGMA_T") for lbl in selected_labels if (lbl, "SIGMA_T") in df_show.columns]
+    sigmat_columns_total = [(lbl, "STD20") for lbl in selected_labels if (lbl, "STD20") in df_show.columns]
     quant_columns_total = [(lbl, "QUANT") for lbl in selected_labels if (lbl, "QUANT") in df_show.columns]
 
     # --------------------------------------
@@ -543,7 +545,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
 
     metric_options = ["Z20", "Z60", "Z120",
                       "S20", "S60", "S120",
-                      "GAP20", "GAP60", "QUANT", "STD", "SIGMA_T"]
+                      "GAP20", "GAP60", "QUANT", "STD", "STD20"]
 
     # 실제 존재하는 지표만
     available = []
@@ -552,7 +554,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             available.append(m)
 
     if not available:
-        st.error("indicator_df에 S/Z/GAP20/GAP60/QUANT/STD/SIGMA_T 관련 컬럼이 없습니다.")
+        st.error("indicator_df에 S/Z/GAP20/GAP60/QUANT/STD/STD20 관련 컬럼이 없습니다.")
         st.write("현재 indicator_df.columns 예시:", list(indicator_df.columns)[:20])
         return
 
@@ -601,7 +603,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     std_columns_metric = []
     if metric in ("GAP20", "GAP60"):
         gap_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
-    elif metric in ("STD", "SIGMA_T"):
+    elif metric in ("STD", "STD20"):
         std_columns_metric = [lbl for lbl in selected_labels if lbl in df_filtered_display.columns]
 
     # 평균 행 추가
@@ -657,7 +659,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     }
     for lbl in selected_labels:
         if lbl in df_filtered.columns:
-            column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric in ("STD", "SIGMA_T") else "%.0f")
+            column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric in ("STD", "STD20") else "%.0f")
 
     # 강조에서 평균/지수 행 제외
     base_len = len(df_filtered_display)  # 순수 종목 행 개수
@@ -676,10 +678,10 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             allowed_mask.iloc[idx_avg_idx] = False
 
     # 스타일 (색상 강조)
-    styler = df_filtered.style.format({lbl: ("{:.2f}" if metric in ("STD", "SIGMA_T") else "{:.0f}") for lbl in selected_labels}, na_rep="-")
+    styler = df_filtered.style.format({lbl: ("{:.2f}" if metric in ("STD", "STD20") else "{:.0f}") for lbl in selected_labels}, na_rep="-")
     if metric.startswith("GAP"):
         styler = _highlight_row_min_max_cells(styler, gap_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
-    elif metric in ("STD", "SIGMA_T"):
+    elif metric in ("STD", "STD20"):
         styler = _highlight_row_min_max_cells(styler, std_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
     elif metric.startswith("Z"):
         styler = _highlight_threshold(styler, [lbl for lbl in selected_labels],
@@ -974,6 +976,8 @@ sheet_names = ["z20", "z30", "z60", "z120", "s20", "s60", "s120", "gap", "gap60"
 display_metric_by_sheet = {
     "gap": "GAP20",
     "gap60": "GAP60",
+    # 저장 시트명 sigmat는 유지하지만, 화면과 내부 표시 키는 STD20으로 통일한다.
+    "sigmat": "STD20",
 }
 
 base_ws = None
