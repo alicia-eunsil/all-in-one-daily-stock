@@ -1,6 +1,6 @@
 """
 File: stock_dashboard.py
-Version: v4.2.1
+Version: v4.2.3
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
 # 메모: v4.0.1 - GAP/STD 상하위 강조 시 평균·지수 행 제외 + 동률 포함, 불필요 포맷 함수 제거
 # 메모: v4.0.2 - Z30 출력 추가
@@ -9,15 +9,17 @@ Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보�
 # 메모: v4.1.1 - 데이터프레임 높이를 브라우저 높이(100vh) 기반으로 동적 조정
 # 메모: v4.2.0 - KR_Stocks_Individual에 개인/외국인/기관계 순매수(일별) '매수량' 탭 추가
 # 메모: v4.2.1 - sigmat/isigmat는 화면에서 20일 표준편차 의미인 STD20으로 표시
+# 메모: v4.2.2 - 접속코드 bcrypt 해시는 소스 하드코딩 대신 환경변수/Secrets에서 읽도록 변경
+# 메모: v4.2.3 - 접속코드는 평문 환경변수/Secrets ACCESS_CODE로도 읽을 수 있게 지원
 """
 
 import streamlit as st
 import subprocess
 import sys
+import os
 import pandas as pd
 import openpyxl
 from pathlib import Path
-import bcrypt
 from datetime import datetime, date, timedelta
 import json  # 🔥 4개 엑셀 매핑용
 
@@ -29,10 +31,39 @@ st.set_page_config(page_title="주식 데이터 대시보드", page_icon="🚀",
 # ======================================
 # 0. 인증 (간단 비밀번호)
 # ======================================
-ACCESS_CODE_HASH = b"$2b$12$gDBpQYK.g938H.8cNwLeUu/VRidCP1GxqusJiEQzVnvaSrG4CBE6K"
+def load_access_code():
+    # 운영에서는 평문 ACCESS_CODE를 우선 사용하고, 없으면 기존 bcrypt 해시도 fallback 지원한다.
+    plain_value = os.getenv("ACCESS_CODE")
+    if not plain_value:
+        try:
+            plain_value = st.secrets.get("ACCESS_CODE")
+        except Exception:
+            plain_value = None
+
+    if plain_value:
+        return {"mode": "plain", "value": str(plain_value)}
+
+    hash_value = os.getenv("ACCESS_CODE_HASH")
+    if not hash_value:
+        try:
+            hash_value = st.secrets.get("ACCESS_CODE_HASH")
+        except Exception:
+            hash_value = None
+
+    if hash_value:
+        return {"mode": "hash", "value": str(hash_value).encode()}
+
+    return None
+
+
+ACCESS_CODE_CONFIG = load_access_code()
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
+
+if ACCESS_CODE_CONFIG is None:
+    st.error("ACCESS_CODE 또는 ACCESS_CODE_HASH 환경변수/Secrets가 설정되지 않았습니다.")
+    st.stop()
 
 if not st.session_state["authenticated"]:
     st.title("🔒 Access Required")
@@ -43,7 +74,14 @@ if not st.session_state["authenticated"]:
         submitted = st.form_submit_button("Submit")
 
     if submitted:
-        if bcrypt.checkpw(code.encode(), ACCESS_CODE_HASH):
+        is_valid = False
+        if ACCESS_CODE_CONFIG["mode"] == "plain":
+            is_valid = code == ACCESS_CODE_CONFIG["value"]
+        else:
+            import bcrypt
+            is_valid = bcrypt.checkpw(code.encode(), ACCESS_CODE_CONFIG["value"])
+
+        if is_valid:
             st.session_state["authenticated"] = True
             st.success("Access granted")
             st.rerun()
