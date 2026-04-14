@@ -931,8 +931,20 @@ def render_std20_view(std20_df, std20_range_msg, total_std20_days, index_std20_r
         df_std20[c] = pd.to_numeric(df_std20[c], errors="coerce")
 
     # STD20은 실제 표준편차 절대값이라 큰 수가 나올 수 있어 천단위 콤마를 표시한다.
+    styler = df_std20.style.format({c: "{:,.2f}" for c in date_cols}, na_rep="-")
+
+    # 표준편차 탭은 STD와 같은 규칙을 적용한다:
+    # 최근 20일 중 각 종목 행의 최댓값은 빨강, 최솟값은 파랑.
+    disallow_codes = set()
+    if index_std20_rows:
+        disallow_codes.update(str(row.get("업종코드", "")).strip() for row in index_std20_rows)
+
+    allowed_mask = ~df_std20["종목코드"].astype(str).isin(disallow_codes)
+    allowed_mask.index = df_std20.index
+    styler = _highlight_row_min_max_cells(styler, date_cols, lookback_n=20, allowed_mask=allowed_mask)
+
     st.dataframe(
-        df_std20.style.format({c: "{:,.2f}" for c in date_cols}, na_rep="-"),
+        styler,
         use_container_width=True,
         hide_index=True,
         column_config=column_config,
