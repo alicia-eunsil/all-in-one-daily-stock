@@ -1,6 +1,6 @@
 """
 File: stock_dashboard.py
-Version: v4.2.3
+Version: v4.2.4
 Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보드.
 # 메모: v4.0.1 - GAP/STD 상하위 강조 시 평균·지수 행 제외 + 동률 포함, 불필요 포맷 함수 제거
 # 메모: v4.0.2 - Z30 출력 추가
@@ -11,6 +11,7 @@ Role: 계산된 주가 지표와 원자료를 조회하는 Streamlit 대시보�
 # 메모: v4.2.1 - sigmat/isigmat는 화면에서 20일 표준편차 의미인 STD20으로 표시
 # 메모: v4.2.2 - 접속코드 bcrypt 해시는 소스 하드코딩 대신 환경변수/Secrets에서 읽도록 변경
 # 메모: v4.2.3 - 접속코드는 평문 환경변수/Secrets ACCESS_CODE로도 읽을 수 있게 지원
+# 메모: v4.2.4 - STD20을 종합/지표별에서 분리해 별도 '표준편차' 탭으로 표시
 """
 
 import streamlit as st
@@ -107,6 +108,8 @@ if "show_days_raw" not in st.session_state:
     st.session_state.show_days_raw = 10  # 시작: 최근 10일
 if "show_days_buy" not in st.session_state:
     st.session_state.show_days_buy = 10  # 시작: 최근 10일
+if "show_days_std20" not in st.session_state:
+    st.session_state.show_days_std20 = 10  # 시작: 최근 10일
 
 # 🔥 파일 선택 상태
 BASE_DIR = Path(__file__).resolve().parent
@@ -409,7 +412,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # --------------------------------------
     # 🔥 멀티헤더 생성 (1행: 날짜, 2행: 지표명)
     # --------------------------------------
-    metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD", "STD20"]
+    metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD"]
     base_cols = ["종목코드", "종목명"]
     df_show = df_f[base_cols].copy()
 
@@ -480,7 +483,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # Z/S/Q/GAP20/GAP60 포맷 적용
     # --------------------------------------
     for lbl in selected_labels:
-        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "STD", "STD20", "QUANT"]:
+        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "STD", "QUANT"]:
             col = (lbl, m)
             if col in df_show.columns:
                 df_show[col] = pd.to_numeric(df_show[col], errors="coerce")
@@ -490,7 +493,6 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     gap20_columns_total = [(lbl, "GAP20") for lbl in selected_labels if (lbl, "GAP20") in df_show.columns]
     gap60_columns_total = [(lbl, "GAP60") for lbl in selected_labels if (lbl, "GAP60") in df_show.columns]
     std_columns_total = [(lbl, "STD") for lbl in selected_labels if (lbl, "STD") in df_show.columns]
-    sigmat_columns_total = [(lbl, "STD20") for lbl in selected_labels if (lbl, "STD20") in df_show.columns]
     quant_columns_total = [(lbl, "QUANT") for lbl in selected_labels if (lbl, "QUANT") in df_show.columns]
 
     # --------------------------------------
@@ -526,9 +528,6 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
         fmt_map[col] = "{:.0f}"
     for col in std_columns_total:
         fmt_map[col] = "{:.2f}"
-    # STD20은 실제 표준편차 절대값이라 큰 수가 나올 수 있어 천단위 콤마를 표시한다.
-    for col in sigmat_columns_total:
-        fmt_map[col] = "{:,.2f}"
 
     styler = df_show.style.format(fmt_map, na_rep="-")
 
@@ -586,7 +585,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
 
     metric_options = ["Z20", "Z60", "Z120",
                       "S20", "S60", "S120",
-                      "GAP20", "GAP60", "QUANT", "STD", "STD20"]
+                      "GAP20", "GAP60", "QUANT", "STD"]
 
     # 실제 존재하는 지표만
     available = []
@@ -595,7 +594,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             available.append(m)
 
     if not available:
-        st.error("indicator_df에 S/Z/GAP20/GAP60/QUANT/STD/STD20 관련 컬럼이 없습니다.")
+        st.error("indicator_df에 S/Z/GAP20/GAP60/QUANT/STD 관련 컬럼이 없습니다.")
         st.write("현재 indicator_df.columns 예시:", list(indicator_df.columns)[:20])
         return
 
@@ -700,7 +699,7 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
     }
     for lbl in selected_labels:
         if lbl in df_filtered.columns:
-            column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric in ("STD", "STD20") else "%.0f")
+            column_config[lbl] = st.column_config.NumberColumn(lbl, format="%.2f" if metric == "STD" else "%.0f")
 
     # 강조에서 평균/지수 행 제외
     base_len = len(df_filtered_display)  # 순수 종목 행 개수
@@ -719,12 +718,10 @@ def render_metric_view(indicator_df, selected_labels, index_metric_map=None):
             allowed_mask.iloc[idx_avg_idx] = False
 
     # 스타일 (색상 강조)
-    # STD20은 화면 가독성을 위해 천단위 콤마를 포함해 표시한다.
-    metric_fmt = "{:,.2f}" if metric == "STD20" else ("{:.2f}" if metric == "STD" else "{:.0f}")
+    metric_fmt = "{:.2f}" if metric == "STD" else "{:.0f}"
     styler = df_filtered.style.format({lbl: metric_fmt for lbl in selected_labels}, na_rep="-")
     if metric.startswith("GAP"):
         styler = _highlight_row_min_max_cells(styler, gap_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
-    # STD20은 아직 강조 규칙이 확정되지 않아 지표별 탭에서는 색상 강조를 적용하지 않는다.
     elif metric == "STD":
         styler = _highlight_row_min_max_cells(styler, std_columns_metric, lookback_n=20, allowed_mask=allowed_mask)
     elif metric.startswith("Z"):
@@ -879,6 +876,70 @@ def render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days):
 
     if st.button("⬅ 과거 10일 더보기(매수량)", disabled=(total_netbuy_days <= st.session_state.show_days_buy)):
         st.session_state.show_days_buy = min(st.session_state.show_days_buy + 10, total_netbuy_days)
+        st.rerun()
+
+
+def render_std20_view(std20_df, std20_range_msg, total_std20_days, index_std20_rows=None):
+    """
+    5️⃣ 표준편차 탭
+    - 종목코드/종목명 + 날짜별 STD20
+    """
+    if std20_df is None:
+        st.warning("⚠️ 표준편차(STD20) 데이터를 불러올 수 없습니다.")
+        return
+
+    st.markdown("### 🔍 필터 옵션 (표준편차)")
+    s1, s2 = st.columns(2)
+    with s1:
+        search_std20 = st.text_input("🔎 종목명/종목코드 검색", key="search_std20")
+    with s2:
+        sort_std20 = st.selectbox("정렬 기준", ["종목코드", "종목명"], key="sort_std20")
+
+    df_std20 = std20_df.copy()
+
+    if search_std20:
+        df_std20 = df_std20[
+            df_std20["종목코드"].astype(str).str.contains(search_std20, case=False) |
+            df_std20["종목명"].astype(str).str.contains(search_std20, case=False)
+        ]
+
+    df_std20 = df_std20.sort_values(by=sort_std20)
+    st.info(std20_range_msg)
+
+    date_cols = [c for c in df_std20.columns if c not in ["종목코드", "종목명"]]
+    if not date_cols:
+        st.warning("⚠️ 표준편차(STD20) 날짜 컬럼이 없습니다.")
+        return
+
+    df_std20 = df_std20[["종목코드", "종목명"] + date_cols]
+
+    if index_std20_rows:
+        for row in index_std20_rows:
+            new_row = {"종목코드": row.get("업종코드", ""), "종목명": row.get("업종명", "")}
+            for c in date_cols:
+                new_row[c] = row.get(c, None)
+            df_std20.loc[len(df_std20)] = new_row
+
+    column_config = {
+        "종목코드": st.column_config.TextColumn("종목코드", width="small", pinned="left"),
+        "종목명": st.column_config.TextColumn("종목명", width="small", pinned="left"),
+    }
+    for c in date_cols:
+        column_config[c] = st.column_config.NumberColumn(c, width="small")
+
+    for c in date_cols:
+        df_std20[c] = pd.to_numeric(df_std20[c], errors="coerce")
+
+    # STD20은 실제 표준편차 절대값이라 큰 수가 나올 수 있어 천단위 콤마를 표시한다.
+    st.dataframe(
+        df_std20.style.format({c: "{:,.2f}" for c in date_cols}, na_rep="-"),
+        use_container_width=True,
+        hide_index=True,
+        column_config=column_config,
+    )
+
+    if st.button("⬅ 과거 10일 더보기(표준편차)", disabled=(total_std20_days <= st.session_state.show_days_std20)):
+        st.session_state.show_days_std20 = min(st.session_state.show_days_std20 + 10, total_std20_days)
         st.rerun()
 
 
@@ -1228,6 +1289,10 @@ index_df = None
 netbuy_df_map = {}
 total_netbuy_days = 0
 netbuy_range_msg = ""
+std20_df = None
+index_std20_rows = []
+total_std20_days = 0
+std20_range_msg = ""
 
 if "지수" in wb.sheetnames and indicator_df is not None and selected_labels:
     ws_idx = wb["지수"]
@@ -1286,6 +1351,109 @@ if "지수" in wb.sheetnames and indicator_df is not None and selected_labels:
 
     if index_rows:
         index_df = pd.DataFrame(index_rows)
+
+# ======================================
+# 12.3. 표준편차(STD20) 데이터 로딩
+# ======================================
+if "sigmat" in wb.sheetnames:
+    ws_std20 = wb["sigmat"]
+    std20_date_infos = []
+
+    for col in range(3, ws_std20.max_column + 1):
+        raw = ws_std20.cell(row=1, column=col).value
+        if raw is None:
+            continue
+        dt = _to_datetime(raw)
+        if dt is None:
+            continue
+        label = dt.strftime("%Y.%m.%d.")
+        std20_date_infos.append((col, raw, dt, label))
+
+    std20_date_infos = sorted(
+        std20_date_infos,
+        key=lambda x: (x[2] is None, x[2] or datetime.min)
+    )
+
+    total_std20_days = len(std20_date_infos)
+    if total_std20_days > 0:
+        show_std20 = min(st.session_state.show_days_std20, total_std20_days)
+        start_idx = total_std20_days - show_std20
+        selected_std20_infos = std20_date_infos[start_idx:]
+        selected_std20_labels = [lbl for _, _, _, lbl in selected_std20_infos]
+
+        std20_range_msg = (
+            f"📅 표준편차 표시 범위: **{selected_std20_labels[0]} ~ {selected_std20_labels[-1]}** "
+            f"(최근 {show_std20}일 / 전체 {total_std20_days}일)"
+        )
+
+        stock_info_norm = {}
+        for code, name in stock_info.items():
+            code_str = str(code).strip()
+            if code_str.isdigit():
+                code_str = code_str.zfill(6)
+            stock_info_norm[code_str] = name
+
+        label_to_col_std20 = {}
+        for col in range(3, ws_std20.max_column + 1):
+            raw = ws_std20.cell(row=1, column=col).value
+            if raw is None:
+                continue
+            lbl = format_excel_date(raw)
+            label_to_col_std20[lbl] = col
+
+        std20_dict = {
+            code: {"종목코드": code, "종목명": name}
+            for code, name in stock_info_norm.items()
+        }
+
+        for r in range(2, ws_std20.max_row + 1):
+            code = ws_std20.cell(row=r, column=2).value
+            if code is None:
+                continue
+            code_str = str(code).strip()
+            if code_str.isdigit():
+                code_str = code_str.zfill(6)
+            if code_str not in std20_dict:
+                continue
+
+            for lbl in selected_std20_labels:
+                col_idx = label_to_col_std20.get(lbl)
+                val = ws_std20.cell(row=r, column=col_idx).value if col_idx else None
+                std20_dict[code_str][lbl] = val
+
+        std20_df = pd.DataFrame.from_dict(std20_dict, orient="index").reset_index(drop=True)
+        for lbl in selected_std20_labels:
+            if lbl in std20_df.columns:
+                std20_df[lbl] = pd.to_numeric(std20_df[lbl], errors="coerce")
+
+        if is_index_target and "isigmat" in wb.sheetnames:
+            ws_istd20 = wb["isigmat"]
+            label_to_col_istd20 = {}
+            for col in range(3, ws_istd20.max_column + 1):
+                raw = ws_istd20.cell(row=1, column=col).value
+                if raw is None:
+                    continue
+                lbl = format_excel_date(raw)
+                label_to_col_istd20[lbl] = col
+
+            rows_std20 = []
+            for r in range(2, ws_istd20.max_row + 1):
+                name = ws_istd20.cell(row=r, column=1).value
+                code = ws_istd20.cell(row=r, column=2).value
+                if not name or not code:
+                    continue
+
+                code_str = str(code).strip()
+                if code_str.isdigit():
+                    code_str = code_str.zfill(6)
+
+                row_dict = {"업종명": str(name), "업종코드": code_str}
+                for lbl in selected_std20_labels:
+                    col_idx = label_to_col_istd20.get(lbl)
+                    row_dict[lbl] = ws_istd20.cell(row=r, column=col_idx).value if col_idx else None
+                rows_std20.append(row_dict)
+
+            index_std20_rows = rows_std20
 
 # ======================================
 # 12.5. 매수량(순매수) 데이터 로딩
@@ -1380,7 +1548,7 @@ wb.close()
 # ======================================
 # 14. 탭 구성 및 렌더링
 # ======================================
-tab_total, tab_metric, tab_raw, tab_netbuy = st.tabs(["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료", "4️⃣ 매수량"])
+tab_total, tab_metric, tab_raw, tab_netbuy, tab_std20 = st.tabs(["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료", "4️⃣ 매수량", "5️⃣ 표준편차"])
 
 with tab_total:
     if indicator_df is None:
@@ -1414,6 +1582,12 @@ with tab_netbuy:
         st.warning("⚠️ 매수량(순매수) 시트가 없습니다. stock_history.py 실행 후 다시 확인해 주세요.")
     else:
         render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days)
+
+with tab_std20:
+    if std20_df is None:
+        st.warning("⚠️ 표준편차(STD20) 시트가 없습니다. run_all_scores.py 또는 패치 워크플로 실행 후 다시 확인해 주세요.")
+    else:
+        render_std20_view(std20_df, std20_range_msg, total_std20_days, index_std20_rows=index_std20_rows if is_index_target else None)
 
 st.markdown("---")
 st.caption("Created by Alicia")
