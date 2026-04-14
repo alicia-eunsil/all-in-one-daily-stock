@@ -101,15 +101,15 @@ if "data_loaded" not in st.session_state:
 
 # 🔥 종합 탭 날짜 확장용
 if "show_days" not in st.session_state:
-    st.session_state.show_days = 10  # 시작: 최근 10일
+    st.session_state.show_days = 20  # 시작: 최근 20일
 
 # 🔥 원자료 탭 날짜 확장용
 if "show_days_raw" not in st.session_state:
-    st.session_state.show_days_raw = 10  # 시작: 최근 10일
+    st.session_state.show_days_raw = 20  # 시작: 최근 20일
 if "show_days_buy" not in st.session_state:
-    st.session_state.show_days_buy = 10  # 시작: 최근 10일
+    st.session_state.show_days_buy = 20  # 시작: 최근 20일
 if "show_days_std20" not in st.session_state:
-    st.session_state.show_days_std20 = 10  # 시작: 최근 10일
+    st.session_state.show_days_std20 = 20  # 시작: 최근 20일
 
 # 🔥 파일 선택 상태
 BASE_DIR = Path(__file__).resolve().parent
