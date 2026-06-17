@@ -33,17 +33,11 @@ jobs:
             pip install requests openpyxl pandas numpy
           fi
 
-      - name: Create secrets.json from GitHub Secrets
-        run: |
-          cat > secrets.json << 'EOF'
-          {
-            "api_key":    "${{ secrets.API_KEY }}",
-            "api_secret": "${{ secrets.API_SECRET }}",
-            "domain":     "${{ secrets.DOMAIN }}"
-          }
-          EOF
-
       - name: Run stock scripts (4 Excel files 전체 처리)
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          API_SECRET: ${{ secrets.API_SECRET }}
+          DOMAIN: ${{ secrets.DOMAIN }}
         run: |
           # 1) 국내/해외 개별 + ETF 원자료(시가/고가/저가/종가/거래량 + 지수) 수집
           python "stock_history.py"
