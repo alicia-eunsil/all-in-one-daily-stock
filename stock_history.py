@@ -10,6 +10,7 @@ Role: 한국투자증권 API를 호출해 주식·ETF 히스토리를 가져오�
 """
 
 import json
+import os
 import requests
 from datetime import datetime, timedelta
 import openpyxl
@@ -35,14 +36,22 @@ NETBUY_MAX_WORKERS = 8
 # 0. 설정/공통 유틸 함수들
 # =========================
 
-def load_api_secrets(file_path='secrets.json'):
-    """API 키와 시크릿을 파일에서 로드"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"에러: {file_path} 파일을 찾을 수 없습니다.")
+def load_api_secrets():
+    """API 키와 시크릿을 환경변수에서 로드"""
+    env_api_key = os.environ.get("API_KEY")
+    env_api_secret = os.environ.get("API_SECRET")
+    env_domain = os.environ.get("DOMAIN")
+
+    if not env_api_key or not env_api_secret:
+        print("에러: API_KEY/API_SECRET 환경변수가 설정되어 있지 않습니다.")
         return None
+
+    print("✅ API 설정을 환경변수(API_KEY/API_SECRET/DOMAIN)에서 로드했습니다.")
+    return {
+        "api_key": env_api_key,
+        "api_secret": env_api_secret,
+        "domain": env_domain or "https://openapi.koreainvestment.com:9443",
+    }
 
 
 def load_file_config(file_path='stock_file_map.json'):
