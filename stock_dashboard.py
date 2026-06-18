@@ -28,7 +28,7 @@ import json  # 🔥 4개 엑셀 매핑용
 # ======================================
 # 페이지 설정 (최초 UI 출력 전에 호출)
 # ======================================
-st.set_page_config(page_title="주식 데이터 대시보드", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="주식 데이터 대시보드", page_icon="🚀", layout="wide", initial_sidebar_state="collapsed")
 
 # ======================================
 # 0. 인증 (간단 비밀번호)
