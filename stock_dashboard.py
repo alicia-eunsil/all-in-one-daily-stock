@@ -210,6 +210,28 @@ def _inject_responsive_dataframe_height_css():
         div[data-testid="stDataFrame"] [data-testid="stVirtualizedDataFrame"] {
             height: 100% !important;
         }
+        div[data-testid="stDataFrame"] * {
+            scrollbar-width: auto;
+            scrollbar-color: #9ca3af #f3f4f6;
+        }
+        div[data-testid="stDataFrame"] *::-webkit-scrollbar {
+            width: 14px;
+            height: 14px;
+        }
+        div[data-testid="stDataFrame"] *::-webkit-scrollbar-track {
+            background: #f3f4f6;
+        }
+        div[data-testid="stDataFrame"] *::-webkit-scrollbar-thumb {
+            background-color: #9ca3af;
+            border: 3px solid #f3f4f6;
+            border-radius: 8px;
+        }
+        div[data-testid="stDataFrame"] *::-webkit-scrollbar-thumb:hover {
+            background-color: #6b7280;
+        }
+        div[data-testid="stDataFrame"] *::-webkit-scrollbar-corner {
+            background: #f3f4f6;
+        }
         </style>
         """,
         unsafe_allow_html=True,
