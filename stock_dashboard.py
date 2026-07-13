@@ -19,6 +19,7 @@ import streamlit as st
 import subprocess
 import sys
 import os
+import gc
 import pandas as pd
 import openpyxl
 from pathlib import Path
@@ -436,21 +437,23 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # 🔥 멀티헤더 생성 (1행: 날짜, 2행: 지표명)
     # --------------------------------------
     metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD"]
-    base_cols = ["종목코드", "종목명"]
-    df_show = df_f[base_cols].copy()
-
     col_tuples = [("", "종목코드"), ("", "종목명")]
+    df_show_data = {
+        ("", "종목코드"): df_f["종목코드"].to_numpy(copy=False),
+        ("", "종목명"): df_f["종목명"].to_numpy(copy=False),
+    }
 
-    # 날짜 × 지표 조합 생성 (값 없으면 '-' 처리)
+    # 날짜 × 지표 조합을 한 번에 생성해 DataFrame 파편화와 메모리 급증을 막는다.
     for lbl in selected_labels:
         for m in metrics:
             key = (lbl, m)
             if key in df_f.columns:
-                df_show[(lbl, m)] = df_f[key]
+                df_show_data[(lbl, m)] = df_f[key].to_numpy(copy=False)
             else:
-                df_show[(lbl, m)] = "-"
+                df_show_data[(lbl, m)] = ["-"] * len(df_f)
             col_tuples.append((lbl, m))
 
+    df_show = pd.DataFrame(df_show_data).reset_index(drop=True)
     df_show.columns = pd.MultiIndex.from_tuples(col_tuples)
 
     # --------------------------------------
@@ -1011,11 +1014,10 @@ st.markdown("### 📂 조회할 주식 그룹 선택")
 selected_category = st.radio(
     "주식 그룹",
     categories,
-    index=categories.index(st.session_state.selected_category),
+    key="selected_category",
     horizontal=True,
     label_visibility="collapsed",
 )
-st.session_state.selected_category = selected_category
 selected_filename = EXCEL_MAP[selected_category]
 excel_path = (BASE_DIR / selected_filename).resolve()
 is_index_target = excel_path.stem == "KR_Stocks_Individual"
@@ -1202,6 +1204,7 @@ if base_ws:
                 data_dict[code][(lbl, metric_key)] = val
 
     indicator_df = pd.DataFrame.from_dict(data_dict, orient="index").reset_index(drop=True)
+    del data_dict
 
 else:
     indicator_df = None
@@ -1275,6 +1278,7 @@ if "종가" in wb.sheetnames:
             close_dict[code][label] = val
 
     close_df = pd.DataFrame.from_dict(close_dict, orient="index").reset_index(drop=True)
+    del close_dict
 
     # 컬럼 이름을 yyyy.mm.dd. 형식으로 통일
     rename_map = {}
@@ -1457,6 +1461,7 @@ if "sigmat" in wb.sheetnames:
                 std20_dict[code_str][lbl] = val
 
         std20_df = pd.DataFrame.from_dict(std20_dict, orient="index").reset_index(drop=True)
+        del std20_dict
         for lbl in selected_std20_labels:
             if lbl in std20_df.columns:
                 std20_df[lbl] = pd.to_numeric(std20_df[lbl], errors="coerce")
@@ -1570,6 +1575,7 @@ if is_index_target:
                         buy_dict[code_str][lbl] = val
 
                 df_buy = pd.DataFrame.from_dict(buy_dict, orient="index").reset_index(drop=True)
+                del buy_dict
                 for lbl in selected_buy_labels:
                     if lbl in df_buy.columns:
                         df_buy[lbl] = pd.to_numeric(df_buy[lbl], errors="coerce")
@@ -1579,13 +1585,34 @@ if is_index_target:
 # 13. 엑셀 파일 닫기
 # ======================================
 wb.close()
+# openpyxl 워크북과 워크시트 참조를 렌더링 전에 해제한다. 큰 파일에서 다른
+# 카테고리로 전환할 때 이전/현재 실행의 메모리가 겹쳐 앱이 종료되는 것을 방지한다.
+wb = None
+base_ws = None
+ws = None
+ws_idx_raw = None
+ws_idx = None
+ws_std20 = None
+ws_istd20 = None
+netbuy_base_sheet = None
+ws_buy = None
+gc.collect()
 
 # ======================================
-# 14. 탭 구성 및 렌더링
+# 14. 화면 구성 및 렌더링
 # ======================================
-tab_total, tab_metric, tab_raw, tab_netbuy, tab_std20 = st.tabs(["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료", "4️⃣ 매수량", "5️⃣ 표준편차"])
+view_options = ["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료", "4️⃣ 매수량", "5️⃣ 표준편차"]
+selected_view = st.radio(
+    "조회 화면",
+    view_options,
+    key="selected_view",
+    horizontal=True,
+    label_visibility="collapsed",
+)
 
-with tab_total:
+# st.tabs는 선택하지 않은 탭의 대형 표까지 모두 렌더링한다. 현재 화면 하나만
+# 렌더링해 카테고리 전환 시 이전/현재 표의 메모리가 겹치는 것을 방지한다.
+if selected_view == "1️⃣ 종합":
     if indicator_df is None:
         st.warning("⚠️ 종합 데이터를 불러올 수 없습니다.")
     else:
@@ -1598,19 +1625,19 @@ with tab_total:
             index_metric_rows=index_metric_rows,
         )
 
-with tab_metric:
+elif selected_view == "2️⃣ 지표별":
     if indicator_df is None:
         st.warning("⚠️ 지표별 데이터를 불러올 수 없습니다.")
     else:
         render_metric_view(indicator_df, selected_labels, index_metric_map=index_metric_map)
 
-with tab_raw:
+elif selected_view == "3️⃣ 원자료":
     if close_df is None:
         st.warning("⚠️ 원자료(종가) 데이터를 불러올 수 없습니다.")
     else:
         render_raw_view(close_df, close_range_msg, total_close_days, index_close_rows=index_close_rows if is_index_target else None)
 
-with tab_netbuy:
+elif selected_view == "4️⃣ 매수량":
     if not is_index_target:
         st.info("KR_Stocks_Individual에서만 매수량 탭을 지원합니다.")
     elif not netbuy_df_map:
@@ -1618,7 +1645,7 @@ with tab_netbuy:
     else:
         render_netbuy_view(netbuy_df_map, netbuy_range_msg, total_netbuy_days)
 
-with tab_std20:
+elif selected_view == "5️⃣ 표준편차":
     if std20_df is None:
         st.warning("⚠️ 표준편차(STD20) 시트가 없습니다. run_all_scores.py 또는 패치 워크플로 실행 후 다시 확인해 주세요.")
     else:
