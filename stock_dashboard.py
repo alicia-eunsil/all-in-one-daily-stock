@@ -545,8 +545,10 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
 
             df_show.loc[len(df_show)] = new_row_vals
 
-    # 인덱스 설정 (종목코드·종목명)
-    df_show = df_show.set_index([("", "종목코드"), ("", "종목명")])
+    # 종목코드·종목명은 데이터 컬럼으로 유지한다. 이 두 튜플 컬럼을 행 인덱스로
+    # 만들면 Streamlit/PyArrow가 non-str index name을 직렬화하는 과정에서
+    # Python 3.13 환경의 프로세스가 segmentation fault로 종료될 수 있다.
+    df_show = df_show.reset_index(drop=True)
 
     # 숫자 포맷 적용
     fmt_map = {}
@@ -562,7 +564,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     if index_rows_df is not None and not index_rows_df.empty:
         disallow_codes.update(index_rows_df[("", "종목코드")].astype(str))
 
-    mask_codes = ~df_show.index.get_level_values(0).astype(str).isin(disallow_codes)
+    mask_codes = ~df_show[("", "종목코드")].astype(str).isin(disallow_codes)
     allowed_mask_total = pd.Series(mask_codes, index=df_show.index)
 
     # 강조 색상 적용
@@ -586,9 +588,10 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
                                       low_cond=lambda v: v < 25)
 
     st.dataframe(
-    styler,
-    use_container_width=True,
-)
+        styler,
+        use_container_width=True,
+        hide_index=True,
+    )
 
     # 🔥 과거 확장 버튼 (종합)
     if st.button("⬅ 과거 10일 더보기(종합)", disabled=(total_days <= st.session_state.show_days)):
