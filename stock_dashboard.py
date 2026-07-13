@@ -436,21 +436,24 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # 🔥 멀티헤더 생성 (1행: 날짜, 2행: 지표명)
     # --------------------------------------
     metrics = ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "QUANT", "STD"]
-    base_cols = ["종목코드", "종목명"]
-    df_show = df_f[base_cols].copy()
-
     col_tuples = [("", "종목코드"), ("", "종목명")]
+    df_show_data = {
+        ("", "종목코드"): df_f["종목코드"].to_numpy(copy=False),
+        ("", "종목명"): df_f["종목명"].to_numpy(copy=False),
+    }
 
-    # 날짜 × 지표 조합 생성 (값 없으면 '-' 처리)
+    # 날짜 × 지표 컬럼을 한 번에 생성한다. 열을 반복 삽입하면 수백 개의 내부
+    # 블록으로 파편화되어 Streamlit/PyArrow 직렬화 과정이 불안정해질 수 있다.
     for lbl in selected_labels:
         for m in metrics:
             key = (lbl, m)
             if key in df_f.columns:
-                df_show[(lbl, m)] = df_f[key]
+                df_show_data[(lbl, m)] = df_f[key].to_numpy(copy=False)
             else:
-                df_show[(lbl, m)] = "-"
+                df_show_data[(lbl, m)] = [None] * len(df_f)
             col_tuples.append((lbl, m))
 
+    df_show = pd.DataFrame(df_show_data).reset_index(drop=True)
     df_show.columns = pd.MultiIndex.from_tuples(col_tuples)
 
     # --------------------------------------
@@ -505,11 +508,13 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     # --------------------------------------
     # Z/S/Q/GAP20/GAP60 포맷 적용
     # --------------------------------------
-    for lbl in selected_labels:
-        for m in ["Z20", "Z60", "Z120", "S20", "S60", "S120", "GAP20", "GAP60", "STD", "QUANT"]:
-            col = (lbl, m)
-            if col in df_show.columns:
-                df_show[col] = pd.to_numeric(df_show[col], errors="coerce")
+    base_columns_total = [("", "종목코드"), ("", "종목명")]
+    numeric_columns_total = [col for col in df_show.columns if col not in base_columns_total]
+    numeric_df = df_show[numeric_columns_total].apply(pd.to_numeric, errors="coerce")
+    df_show = pd.concat(
+        [df_show[base_columns_total].copy(), numeric_df],
+        axis=1,
+    )
 
     z_columns_total = [(lbl, m) for lbl in selected_labels for m in ["Z20", "Z60", "Z120"] if (lbl, m) in df_show.columns]
     s_columns_total = [(lbl, m) for lbl in selected_labels for m in ["S20", "S60", "S120"] if (lbl, m) in df_show.columns]
