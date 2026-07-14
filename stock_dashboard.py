@@ -547,10 +547,10 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
 
             df_show.loc[len(df_show)] = new_row_vals
 
-    # 종목코드·종목명은 데이터 컬럼으로 유지한다. 이 두 튜플 컬럼을 행 인덱스로
-    # 만들면 Streamlit/PyArrow가 non-str index name을 직렬화하는 과정에서
-    # Python 3.13 환경의 프로세스가 segmentation fault로 종료될 수 있다.
-    df_show = df_show.reset_index(drop=True)
+    # 두 식별 열을 행 인덱스로 두면 Streamlit 데이터프레임에서 왼쪽에 고정된다.
+    # PyArrow 오류를 막기 위해 튜플 컬럼명이 아닌 문자열 인덱스명을 명시한다.
+    df_show = df_show.set_index([("", "종목코드"), ("", "종목명")])
+    df_show.index = df_show.index.set_names(["종목코드", "종목명"])
 
     # 숫자 포맷 적용
     fmt_map = {}
@@ -566,7 +566,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     if index_rows_df is not None and not index_rows_df.empty:
         disallow_codes.update(index_rows_df[("", "종목코드")].astype(str))
 
-    mask_codes = ~df_show[("", "종목코드")].astype(str).isin(disallow_codes)
+    mask_codes = ~df_show.index.get_level_values("종목코드").astype(str).isin(disallow_codes)
     allowed_mask_total = pd.Series(mask_codes, index=df_show.index)
 
     # 강조 색상 적용
@@ -592,7 +592,7 @@ def render_total_view(indicator_df, selected_labels, indicator_range_msg, total_
     st.dataframe(
         styler,
         use_container_width=True,
-        hide_index=True,
+        hide_index=False,
     )
 
     # 🔥 과거 확장 버튼 (종합)
