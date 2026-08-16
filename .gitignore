@@ -1,2 +1,8 @@
 secrets.json
 stock_file_map.json
+.env
+.env.paper
+logs/
+data/paper_trading_state.json
+__pycache__/
+*.py[cod]

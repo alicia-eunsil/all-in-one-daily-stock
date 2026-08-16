@@ -24,6 +24,7 @@ import openpyxl
 from pathlib import Path
 from datetime import datetime, date, timedelta
 import json  # 🔥 4개 엑셀 매핑용
+from paper_trading.ui import render_paper_trading_tab
 
 # ======================================
 # 페이지 설정 (최초 UI 출력 전에 호출)
@@ -1591,7 +1592,9 @@ wb.close()
 # ======================================
 # 14. 탭 구성 및 렌더링
 # ======================================
-tab_total, tab_metric, tab_raw, tab_netbuy, tab_std20 = st.tabs(["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료", "4️⃣ 매수량", "5️⃣ 표준편차"])
+tab_total, tab_metric, tab_raw, tab_netbuy, tab_std20, tab_paper = st.tabs(
+    ["1️⃣ 종합", "2️⃣ 지표별", "3️⃣ 원자료", "4️⃣ 매수량", "5️⃣ 표준편차", "6️⃣ 모의투자"]
+)
 
 with tab_total:
     if indicator_df is None:
@@ -1631,6 +1634,9 @@ with tab_std20:
         st.warning("⚠️ 표준편차(STD20) 시트가 없습니다. run_all_scores.py 또는 패치 워크플로 실행 후 다시 확인해 주세요.")
     else:
         render_std20_view(std20_df, std20_range_msg, total_std20_days, index_std20_rows=index_std20_rows if is_index_target else None)
+
+with tab_paper:
+    render_paper_trading_tab()
 
 st.markdown("---")
 st.caption("Created by Alicia")
